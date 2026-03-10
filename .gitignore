@@ -1,0 +1,23 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# env
+.env
+.env.*
+!.env.example
+
+# logs
+*.log
+logs/
+
+# build/dist
+dist/
+build/
+.turbo/
+
+# IDE/OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
