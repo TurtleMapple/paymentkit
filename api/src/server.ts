@@ -32,6 +32,8 @@ const startServer = async () => {
     })
 
     console.log(`✅ Server running on port ${env.PORT}`)
+    console.log(`🔗 API Documentation: http://localhost:${env.PORT}/doc`)
+    console.log(`🔗 API Reference: http://localhost:${env.PORT}/reference`)
   } catch (error) {
     console.error('❌ Failed to start server:', error)
   }
