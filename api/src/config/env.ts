@@ -27,6 +27,9 @@ const envSchema = z.object({
 
   // API
   API_KEY: z.string().min(1, 'API_KEY is required'),
+
+  // Logging
+  LOG_LEVEL: z.enum(['info', 'success', 'error', 'debug', 'warn']).default('info'),
 });
 
 const parsedEnv = envSchema.safeParse(process.env);

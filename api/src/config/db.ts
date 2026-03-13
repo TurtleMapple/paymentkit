@@ -3,6 +3,7 @@ import { MySqlDriver } from "@mikro-orm/mysql";
 import { Migrator } from "@mikro-orm/migrations";
 import { Payment } from "../domain/entities/paymentEntity";
 import { env } from "./env";
+import { logger } from "../utils/logger";
 
 export const getDbConfig = (): Options => {
   if (env.DATABASE_URL) {
@@ -16,7 +17,7 @@ export const getDbConfig = (): Options => {
         disableForeignKeys: false,
       },
       namingStrategy: EntityCaseNamingStrategy,
-      debug: env.NODE_ENV !== 'production',
+      debug: env.LOG_LEVEL === 'debug',
       pool: { min: 2, max: 10 },
     };
   }
@@ -35,7 +36,7 @@ export const getDbConfig = (): Options => {
       disableForeignKeys: false,
     },
     namingStrategy: EntityCaseNamingStrategy,
-    debug: env.NODE_ENV !== 'production',
+    debug: env.LOG_LEVEL === 'debug',
     pool: { min: 2, max: 10 },
   };
 };

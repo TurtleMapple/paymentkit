@@ -1,4 +1,5 @@
 import { getRabbitMQChannel } from './channel'
+import { logger } from '../../../utils/logger'
 
 /**
  * ============================================
@@ -43,7 +44,7 @@ export const ROUTING_KEYS = {
 export async function setupTopology() {
     const channel = await getRabbitMQChannel()
     
-    console.log('🔧 Setting up RabbitMQ topology...')
+    logger.info('Setting up RabbitMQ topology...')
     
     // ============================================
     // STEP 1: DECLARE MAIN EXCHANGE
@@ -58,7 +59,7 @@ export async function setupTopology() {
     // STEP 2: DECLARE DLX EXCHANGE
     // ============================================
     // Dead Letter Exchange untuk handle failed messages
-    console.log(`📢 Declaring DLX exchange: ${EXCHANGES.PAYMENT_DLX} (type: fanout)`)
+    logger.debug(`Declaring DLX exchange: ${EXCHANGES.PAYMENT_DLX} (type: fanout)`)
     await channel.assertExchange(EXCHANGES.PAYMENT_DLX, 'fanout', {
         durable: true,
     })
@@ -66,7 +67,7 @@ export async function setupTopology() {
     // ============================================
     // STEP 3: DECLARE DEAD LETTER QUEUE
     // ============================================
-    console.log(`📦 Declaring DLQ: ${QUEUES.PAYMENT_DLQ}`)
+    logger.debug(`Declaring DLQ: ${QUEUES.PAYMENT_DLQ}`)
     await channel.assertQueue(QUEUES.PAYMENT_DLQ, {
         durable: true,
     })
@@ -74,7 +75,7 @@ export async function setupTopology() {
     // ============================================
     // STEP 4: BIND DLQ TO DLX
     // ============================================
-    console.log(`🔗 Binding ${QUEUES.PAYMENT_DLQ} to ${EXCHANGES.PAYMENT_DLX}`)
+    logger.debug(`Binding ${QUEUES.PAYMENT_DLQ} to ${EXCHANGES.PAYMENT_DLX}`)
     await channel.bindQueue(QUEUES.PAYMENT_DLQ, EXCHANGES.PAYMENT_DLX, '')
     
     // ============================================
@@ -85,13 +86,13 @@ export async function setupTopology() {
         deadLetterExchange: EXCHANGES.PAYMENT_DLX, // Failed messages → DLX
     }
     
-    console.log(`📦 Declaring queue: ${QUEUES.PAYMENT_CREATED}`)
+    logger.debug(`Declaring queue: ${QUEUES.PAYMENT_CREATED}`)
     await channel.assertQueue(QUEUES.PAYMENT_CREATED, queueOptions)
     
-    console.log(`📦 Declaring queue: ${QUEUES.PAYMENT_UPDATED}`)
+    logger.debug(`Declaring queue: ${QUEUES.PAYMENT_UPDATED}`)
     await channel.assertQueue(QUEUES.PAYMENT_UPDATED, queueOptions)
     
-    console.log(`📦 Declaring queue: ${QUEUES.PAYMENT_WEBHOOK}`)
+    logger.debug(`Declaring queue: ${QUEUES.PAYMENT_WEBHOOK}`)
     await channel.assertQueue(QUEUES.PAYMENT_WEBHOOK, queueOptions)
     
     // ============================================
@@ -118,11 +119,14 @@ export async function setupTopology() {
         ROUTING_KEYS.PAYMENT_WEBHOOK
     )
 
-    console.log('✅ RabbitMQ topology setup complete!')
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
-    console.log(`   Main Exchange: ${EXCHANGES.PAYMENT} (topic)`)
-    console.log(`   DLX Exchange: ${EXCHANGES.PAYMENT_DLX} (fanout)`)
-    console.log(`   Queues: ${Object.values(QUEUES).join(', ')}`)
-    console.log(`   Routing Keys: ${Object.values(ROUTING_KEYS).join(', ')}`)
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+    logger.success('RabbitMQ topology setup complete!')
+    
+    if (logger.debug.name) { // Simple check to only show details if debug might be active
+        logger.debug('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+        logger.debug(`   Main Exchange: ${EXCHANGES.PAYMENT} (topic)`)
+        logger.debug(`   DLX Exchange: ${EXCHANGES.PAYMENT_DLX} (fanout)`)
+        logger.debug(`   Queues: ${Object.values(QUEUES).join(', ')}`)
+        logger.debug(`   Routing Keys: ${Object.values(ROUTING_KEYS).join(', ')}`)
+        logger.debug('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+    }
 }
