@@ -1,4 +1,12 @@
-import 'dotenv/config';
+import { config } from 'dotenv';
+import path from 'path';
+
+// Load .env.test if in test environment, otherwise load default .env
+if (process.env.NODE_ENV === 'test') {
+  config({ path: path.resolve(process.cwd(), '.env.test') });
+} else {
+  config();
+}
 import { z } from 'zod';
 
 const envSchema = z.object({

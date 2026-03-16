@@ -14,7 +14,9 @@ export const getDbConfig = (): Options => {
       extensions: [Migrator],
       migrations: {
         path: './src/database/migrations',
+        pathTs: './src/database/migrations',
         disableForeignKeys: false,
+        transactional: true,
       },
       namingStrategy: EntityCaseNamingStrategy,
       debug: env.LOG_LEVEL === 'debug',
@@ -31,10 +33,12 @@ export const getDbConfig = (): Options => {
     dbName: env.DB_NAME,
     entities: [Payment],
     extensions: [Migrator],
-    migrations: {
-      path: './src/database/migrations',
-      disableForeignKeys: false,
-    },
+      migrations: {
+        path: './src/database/migrations',
+        pathTs: './src/database/migrations',
+        disableForeignKeys: false,
+        transactional: true,
+      },
     namingStrategy: EntityCaseNamingStrategy,
     debug: env.LOG_LEVEL === 'debug',
     pool: { min: 2, max: 10 },
