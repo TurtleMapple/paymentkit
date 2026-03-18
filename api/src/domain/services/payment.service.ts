@@ -65,7 +65,7 @@ export class PaymentService {
       customerEmail
     );
 
-    // ✅ DIP: Menggunakan publisher yang disuntikkan via constructor
+    // ✅ DIP: Menggunakan publisher yang disuntikkan via constructora
     await this.publisher.publishPaymentCreated(orderId);
 
     return payment;
