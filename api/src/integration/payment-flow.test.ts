@@ -46,6 +46,7 @@ describe('Big Bang Integration Test: Payment Flow', () => {
       customer: {
         customerName: 'Integration Test User',
         customerEmail: 'test@example.com',
+        phone: '08123456789',
       },
     };
 
@@ -63,16 +64,16 @@ describe('Big Bang Integration Test: Payment Flow', () => {
     expect(res.status).toBe(201);
     
     const body = await res.json();
-    expect(body).toHaveProperty('orderId');
-    expect(body.amount).toBe(paymentData.amount);
-    expect(body.status).toBe('PENDING');
+    expect(body.data).toHaveProperty('orderId');
+    expect(body.data.amount).toBe(paymentData.amount);
+    expect(body.data.status).toBe('PENDING');
 
     // Assert: Check Database Persistence
     const em = orm.em.fork();
-    const paymentInDb = await em.findOne(Payment, { orderId: body.orderId });
+    const paymentInDb = await em.findOne(Payment, { orderId: body.data.orderId });
     
     expect(paymentInDb).not.toBeNull();
-    expect(Number(paymentInDb?.amount)).toBe(paymentData.amount);
+    expect(Number(paymentInDb?.getAmount())).toBe(paymentData.amount);
     expect(paymentInDb?.customerName).toBe(paymentData.customer.customerName);
     expect(paymentInDb?.customerEmail).toBe(paymentData.customer.customerEmail);
   });

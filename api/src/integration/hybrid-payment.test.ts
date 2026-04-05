@@ -49,6 +49,7 @@ describe('Hybrid Integration Test: Payment Flow (Sandwich)', () => {
         customer: {
           customerName: 'Hybrid User',
           customerEmail: 'hybrid@example.com',
+          phone: '08123456789',
         },
       };
 
@@ -68,11 +69,11 @@ describe('Hybrid Integration Test: Payment Flow (Sandwich)', () => {
       // --- SISI BAWAH (Database Verification) ---
       // Kita langsung "turun" ke database untuk memastikan Service bekerja dengan Repository
       const em = orm!.em.fork();
-      const paymentInDb = await em.findOne(Payment, { orderId: body.orderId });
+      const paymentInDb = await em.findOne(Payment, { orderId: body.data.orderId });
 
       expect(paymentInDb).not.toBeNull();
-      expect(paymentInDb?.status).toBe(PaymentStatus.PENDING);
-      expect(Number(paymentInDb?.amount)).toBe(payload.amount);
+      expect(paymentInDb?.getStatus()).toBe(PaymentStatus.PENDING);
+      expect(Number(paymentInDb?.getAmount())).toBe(payload.amount);
       expect(paymentInDb?.customerName).toBe(payload.customer.customerName);
     });
   });
@@ -80,15 +81,11 @@ describe('Hybrid Integration Test: Payment Flow (Sandwich)', () => {
   // Skema "Sandwich" 2: Alur Update & Konsistensi State
   describe('Alur: Polling Detail -> Internal Synchronization', () => {
     it('harus sinkron antara data yang ditarik via API dengan data yang ada di level bawah', async () => {
-      // 1. Setup: Buat data langsung di level bawah (Database)
+      // 1. Setup: Buat data langsung di level bawah (Database) via Static Factory
       const em = orm!.em.fork();
       const orderId = 'hybrid-sync-' + Date.now();
       
-      const payment = new Payment();
-      payment.orderId = orderId;
-      payment.amount = 45000;
-      payment.gateway = 'midtrans';
-      payment.status = PaymentStatus.PENDING;
+      const payment = Payment.create(orderId, 45000, 'midtrans');
       payment.customerName = 'Sync User';
       
       await em.persistAndFlush(payment);

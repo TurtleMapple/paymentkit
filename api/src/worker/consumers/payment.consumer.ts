@@ -95,9 +95,10 @@ const processPayment = async (data: PaymentQueueMessage): Promise<void> => {
 
   const result = await gateway.createPayment({
     orderId: payment.orderId,
-    amount: payment.amount,
+    amount: payment.getAmount(),
     customerName: payment.customerName,
     customerEmail: payment.customerEmail,
+    idempotencyKey: payment.orderId, // Mencegah double-billing
   });
 
   console.log(`[Consumer] Midtrans response:`, result);
@@ -108,7 +109,6 @@ const processPayment = async (data: PaymentQueueMessage): Promise<void> => {
   payment.bank = result.bank;
   payment.vaNumber = result.vaNumber;
   payment.gatewayResponse = result.gatewayResponse;
-  payment.status = PaymentStatus.PENDING;
 
   await em.persistAndFlush(payment);
 

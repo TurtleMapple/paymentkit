@@ -1,10 +1,3 @@
-/**
- * PAYMENT ROUTES
- * 
- * Defines payment-related API endpoints with OpenAPI specifications
- * Following SOLID principles for better maintainability and testability
- */
-
 import { OpenAPIHono } from '@hono/zod-openapi';
 import { createRoute } from '@hono/zod-openapi';
 import { 
@@ -12,13 +5,13 @@ import {
   PaymentResponseSchema,
   OrderIdParamSchema,
   GetPaymentResponseSchema,
-  ErrorResponseSchema,
   GetAllPaymentsQuerySchema,
   GetAllPaymentsResponseSchema
 } from '../schemas/payment.schema';
-import { createPaymentHandler, getAllPaymentsHandler, getPaymentByOrderIdHandler } from '../handler/payment.handler';
+import { ErrorResponseSchema } from '../schemas/shared.schema';
+import { PaymentHandler } from '../handler/payment.handler';
 
-const payment = new OpenAPIHono();
+const payment = new OpenAPIHono<{ Variables: { paymentService: any } }>();
 
 // Custom validation error hook
 const validationHook = (result: any, c: any) => {
@@ -38,7 +31,6 @@ const validationHook = (result: any, c: any) => {
 
 /**
  * POST /payments route definition
- * Creates a new payment and publishes to RabbitMQ for async processing
  */
 const createPaymentRoute = createRoute({
   method: 'post',
@@ -78,7 +70,6 @@ const createPaymentRoute = createRoute({
 
 /**
  * GET /payments route definition
- * Retrieves all payments with pagination and optional filtering
  */
 const getAllPaymentsRoute = createRoute({
   method: 'get',
@@ -104,7 +95,6 @@ const getAllPaymentsRoute = createRoute({
 
 /**
  * GET /payments/:orderId route definition
- * Retrieves payment details by order ID (polling endpoint)
  */
 const getPaymentRoute = createRoute({
   method: 'get',
@@ -136,14 +126,14 @@ const getPaymentRoute = createRoute({
   },
 });
 
-// ===== ROUTE REGISTRATION (SRP: Separate registration logic) =====
-
 /**
  * Register POST /payments endpoint
  */
 payment.openapi(createPaymentRoute, async (c) => {
   const input = c.req.valid('json');
-  return createPaymentHandler(c, input);
+  const service = c.get('paymentService');
+  const handler = new PaymentHandler(service);
+  return handler.createPayment(c, input) as any;
 }, validationHook);
 
 /**
@@ -151,7 +141,9 @@ payment.openapi(createPaymentRoute, async (c) => {
  */
 payment.openapi(getAllPaymentsRoute, async (c) => {
   const query = c.req.valid('query');
-  return getAllPaymentsHandler(c, query);
+  const service = c.get('paymentService');
+  const handler = new PaymentHandler(service);
+  return handler.getAllPayments(c, query) as any;
 }, validationHook);
 
 /**
@@ -159,7 +151,9 @@ payment.openapi(getAllPaymentsRoute, async (c) => {
  */
 payment.openapi(getPaymentRoute, async (c) => {
   const { orderId } = c.req.valid('param');
-  return getPaymentByOrderIdHandler(c, orderId);
+  const service = c.get('paymentService');
+  const handler = new PaymentHandler(service);
+  return handler.getPaymentByOrderId(c, orderId) as any;
 }, validationHook);
 
 export default payment;

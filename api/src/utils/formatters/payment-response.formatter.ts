@@ -1,36 +1,31 @@
 import { Payment } from "../../domain/entities/paymentEntity";
+import { PaymentResponse } from "../../schemas/payment.schema";
 
 /**
  * Maps Payment entity to response DTO
+ * Mapped tightly to PaymentResponse Zod schema inference
  * Reusable across multiple handlers
  */
-export function mapPaymentToResponse(payment: Payment) {
-  // Extract dari gatewayResponse jika ada
-  const gatewayData = payment.gatewayResponse || {};
-
+export function mapPaymentToResponse(payment: Payment): PaymentResponse {
   return {
-    id: payment.id,
+    id: payment.getId(),
     orderId: payment.orderId,
-    amount: payment.amount,
-    status: payment.status,
-    paymentType: payment.paymentType || null,
-    bank: payment.bank || null,
-    vaNumber: payment.vaNumber || null,
-    paymentLink: payment.paymentLink || null,
-    expiredAt: payment.expiredAt?.toISOString() || null,
-    paidAt: payment.paidAt?.toISOString() || null,
+    amount: payment.getAmount(),
+    status: payment.getStatus(),
+    paymentType: payment.paymentType,
+    bank: payment.bank,
+    vaNumber: payment.vaNumber,
+    paymentLink: payment.paymentLink,
+    expiredAt: payment.expiredAt,
+    paidAt: payment.paidAt,
     gateway: payment.gateway,
-    customerName: payment.customerName || null,
-    customerEmail: payment.customerEmail || null,
-
-    // Field tambahan dari Midtrans gatewayResponse
-    paymentLinkId: gatewayData.payment_link_id || null,
-    usageLimit: gatewayData.usage_limit || null,
+    gatewayResponse: payment.gatewayResponse,
+    createdAt: payment.createdAt,
+    updatedAt: payment.updatedAt,
+    deletedAt: payment.deletedAt,
+    paymentLinkCreatedAt: payment.paymentLinkCreatedAt,
     paymentAttemptCount: payment.paymentAttemptCount,
-
-    midtransDirectUrl: gatewayData.payment_url || payment.paymentLink || null,
-
-    createdAt: payment.createdAt.toISOString(),
-    updatedAt: payment.updatedAt.toISOString(),
+    customerName: payment.customerName,
+    customerEmail: payment.customerEmail,
   };
 }

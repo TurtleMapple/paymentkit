@@ -1,10 +1,3 @@
-/**
- * WEBHOOK ROUTES
- * 
- * Handles webhook notifications from payment gateways
- * Following SOLID principles for better maintainability
- */
-
 import { OpenAPIHono } from '@hono/zod-openapi';
 import { createRoute } from '@hono/zod-openapi';
 import { 
@@ -12,18 +5,13 @@ import {
   WebhookRequestSchema,
   WebhookResponseSchema
 } from '../schemas/webhook.schema';
-import { ErrorResponseSchema } from '../schemas/payment.schema';
-import { handleWebhook } from '../handler/webhook.handler';
+import { ErrorResponseSchema } from '../schemas/shared.schema';
+import { WebhookHandler } from '../handler/webhook.handler';
 
-const webhook = new OpenAPIHono();
-
-// ===== ROUTE DEFINITION (SRP: Separate route config) =====
+const webhook = new OpenAPIHono<{ Variables: { webhookService: any } }>();
 
 /**
- * POST /webhooks/:gateway route definition
- * Receives and processes webhook notifications from payment gateways
- * 
- * Supported gateways: midtrans
+ * POST /webhooks/{gateway} route definition
  */
 const webhookRoute = createRoute({
   method: 'post',
@@ -90,8 +78,10 @@ const webhookRoute = createRoute({
 webhook.openapi(webhookRoute, async (c) => {
   const { gateway } = c.req.valid('param');
   const body = c.req.valid('json');
+  const service = c.get('webhookService');
+  const handler = new WebhookHandler(service);
   
-  return handleWebhook(c, gateway, body);
+  return handler.handleWebhook(c, { gateway }, body);
 });
 
 export default webhook;

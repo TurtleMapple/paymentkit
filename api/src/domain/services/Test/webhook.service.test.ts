@@ -32,7 +32,9 @@ describe('WebhookService', () => {
         status: PaymentStatus.PAID,
         paymentType: 'bank_transfer'
       };
-      const mockPayment = { orderId: 'ORD-123', status: PaymentStatus.PAID } as Payment;
+      // Gunakan Entity Asli untuk mock
+      const mockPayment = Payment.create('ORD-123', 10000);
+      mockPayment.complete();
 
       vi.mocked(mockGateway.validateWebhook).mockReturnValue(true);
       vi.mocked(mockGateway.processWebhook).mockResolvedValue(webhookResult as any);
@@ -45,7 +47,7 @@ describe('WebhookService', () => {
       expect(mockPaymentService.updatePaymentStatus).toHaveBeenCalledWith(
         'ORD-123',
         PaymentStatus.PAID,
-        expect.objectContaining({ paymentType: 'bank_transfer' })
+        expect.objectContaining({ type: 'bank_transfer' })
       );
     });
 
