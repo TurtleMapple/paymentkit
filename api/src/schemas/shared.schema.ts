@@ -1,13 +1,6 @@
 import { z, ZodType } from 'zod';
 
 /**
- * SHARED ZOD SCHEMAS
- *
- * Schema umum yang digunakan di seluruh API untuk validasi request/response
- * dan generasi dokumentasi OpenAPI.
- */
-
-/**
  * Schema response error
  * Digunakan ketika request gagal validasi atau terjadi error
  */
@@ -30,45 +23,29 @@ export const SuccessResponseSchema = <T>(dataSchema: ZodType<T>) =>
   });
 
 /**
- * Schema untuk data customer
+ * Schema metadata pagination
+ * Digunakan untuk metadata daftar data yang panjang
  */
-export const CustomerSchema = z.object({
-  customerName: z.string().min(1).max(128).optional().describe('Nama customer'),
-  customerEmail: z.string().email().max(128).optional().describe('Email customer'),
+export const PaginationSchema = z.object({
+  page: z.number().describe('Halaman saat ini'),
+  limit: z.number().describe('Jumlah per halaman'),
+  total: z.number().describe('Total seluruh data'),
 });
 
 /**
- * Schema entity Payment
- * Merepresentasikan struktur lengkap payment yang dikembalikan API
- * Sesuai dengan Payment entity dari src/domain/entities/paymentEntity.ts
+ * Factory untuk schema response sukses dengan pagination
+ * Membungkus daftar data dengan format standar { success, message, data, pagination }
+ * @param dataSchema - Zod schema untuk elemen tunggal dalam array data
  */
-export const PaymentSchema = z.object({
-  id: z.string().uuid().describe('ID unik payment'),
-  orderId: z.string().describe('Order ID yang dapat dibaca (UUID v7)'),
-  amount: z.number().positive().describe('Jumlah pembayaran dalam rupiah'),
-  status: z.enum(['PENDING', 'PAID', 'FAILED', 'EXPIRED']).describe('Status payment saat ini'),
-  paymentType: z.string().nullable().optional().describe('Jenis metode pembayaran'),
-  bank: z.string().nullable().optional().describe('Kode bank untuk transfer bank'),
-  vaNumber: z.string().nullable().optional().describe('Nomor virtual account'),
-  expiredAt: z.coerce.date().nullable().optional().describe('Waktu kadaluarsa pembayaran'),
-  paidAt: z.coerce.date().nullable().optional().describe('Waktu pembayaran selesai'),
-  gateway: z.string().describe('Payment gateway yang digunakan (midtrans, xendit)'),
-  gatewayResponse: z.any().nullable().optional().describe('Response mentah dari payment gateway'),
-  createdAt: z.coerce.date().describe('Waktu payment dibuat'),
-  updatedAt: z.coerce.date().describe('Waktu update terakhir'),
-  deletedAt: z.coerce.date().nullable().optional().describe('Waktu soft delete'),
-  paymentLink: z.string().nullable().optional().describe('URL payment link untuk customer'),
-  paymentLinkCreatedAt: z.coerce.date().nullable().optional().describe('Waktu payment link dibuat'),
-  paymentAttemptCount: z.number().int().min(0).describe('Jumlah percobaan generate payment link'),
-  customerName: z.string().nullable().optional().describe('Nama customer'),
-  customerEmail: z.string().nullable().optional().describe('Email customer'),
-});
+export const PaginatedResponseSchema = <T extends z.ZodTypeAny>(dataSchema: T) =>
+  z.object({
+    success: z.literal(true).describe('Status keberhasilan'),
+    message: z.string().describe('Pesan sukses metadata pagination'),
+    data: z.array(dataSchema).describe('Daftar data response'),
+    pagination: PaginationSchema.describe('Metadata pagination'),
+  });
 
-/**
- * Ekspor tipe TypeScript
- */
-export type Payment = z.infer<typeof PaymentSchema>;
-export type Customer = z.infer<typeof CustomerSchema>;
+// ===== TIPE TYPESCRIPT =====
 export type ErrorResponse = z.infer<typeof ErrorResponseSchema>;
 export type SuccessResponse<T> = {
   success: true;

@@ -13,8 +13,7 @@ describe('PaymentService', () => {
   beforeEach(() => {
     mockRepo = {
       findByOrderId: vi.fn(),
-      create: vi.fn(),
-      updateStatus: vi.fn(),
+      save: vi.fn(),
       findAllWithCount: vi.fn(),
     } as unknown as IPaymentRepository;
 
@@ -29,55 +28,55 @@ describe('PaymentService', () => {
   describe('createPayment()', () => {
     it('should create a payment successfully (Happy Path)', async () => {
       const orderId = 'ORD-123';
-      const mockPayment = { orderId, status: PaymentStatus.PENDING } as Payment;
+      const mockPayment = Payment.create(orderId, 10000);
 
       vi.mocked(mockRepo.findByOrderId).mockResolvedValue(null);
-      vi.mocked(mockRepo.create).mockResolvedValue(mockPayment);
+      vi.mocked(mockRepo.save).mockResolvedValue(undefined);
 
       const result = await paymentService.createPayment(orderId, 10000, 'midtrans');
 
-      expect(result).toBe(mockPayment);
-      expect(mockRepo.create).toHaveBeenCalledWith(orderId, 10000, 'midtrans', undefined, undefined);
+      expect(result.orderId).toBe(orderId);
+      expect(mockRepo.save).toHaveBeenCalled();
       expect(mockPublisher.publishPaymentCreated).toHaveBeenCalledWith(orderId);
     });
 
     it('should throw error if Order ID already exists (Sad Path)', async () => {
       const orderId = 'ORD-123';
-      vi.mocked(mockRepo.findByOrderId).mockResolvedValue({ orderId } as Payment);
+      vi.mocked(mockRepo.findByOrderId).mockResolvedValue(Payment.create(orderId, 10000));
 
       await expect(paymentService.createPayment(orderId, 10000, 'midtrans'))
         .rejects.toThrow('Order ID already exists');
       
-      expect(mockRepo.create).not.toHaveBeenCalled();
+      expect(mockRepo.save).not.toHaveBeenCalled();
     });
   });
 
   describe('updatePaymentStatus()', () => {
     it('should update status successfully (Happy Path)', async () => {
       const orderId = 'ORD-123';
-      const existingPayment = { orderId, status: PaymentStatus.PENDING } as Payment;
-      const updatedPayment = { ...existingPayment, status: PaymentStatus.PAID } as Payment;
+      const existingPayment = Payment.create(orderId, 10000);
 
       vi.mocked(mockRepo.findByOrderId).mockResolvedValue(existingPayment);
-      vi.mocked(mockRepo.updateStatus).mockResolvedValue(updatedPayment);
+      vi.mocked(mockRepo.save).mockResolvedValue(undefined);
 
       const result = await paymentService.updatePaymentStatus(orderId, PaymentStatus.PAID);
 
-      expect(result.status).toBe(PaymentStatus.PAID);
-      expect(mockRepo.updateStatus).toHaveBeenCalledWith(orderId, PaymentStatus.PAID, undefined);
+      expect(result.getStatus()).toBe(PaymentStatus.PAID);
+      expect(mockRepo.save).toHaveBeenCalledWith(existingPayment);
       expect(mockPublisher.publishPaymentUpdated).toHaveBeenCalledWith(orderId, PaymentStatus.PAID);
     });
 
     it('should throw error if transition is invalid (Sad Path)', async () => {
       const orderId = 'ORD-123';
-      const existingPayment = { orderId, status: PaymentStatus.PAID } as Payment;
+      const existingPayment = Payment.create(orderId, 10000);
+      existingPayment.complete(); // Status: PAID
 
       vi.mocked(mockRepo.findByOrderId).mockResolvedValue(existingPayment);
 
       await expect(paymentService.updatePaymentStatus(orderId, PaymentStatus.PENDING))
-        .rejects.toThrow(/Invalid transition/);
+        .rejects.toThrow(/Manual transition to PENDING is not allowed/);
       
-      expect(mockRepo.updateStatus).not.toHaveBeenCalled();
+      expect(mockRepo.save).toHaveBeenCalledTimes(0);
     });
 
     it('should throw error if payment is not found (Sad Path)', async () => {
@@ -89,14 +88,15 @@ describe('PaymentService', () => {
 
     it('should return immediately if payment is already in final state (Idempotency)', async () => {
       const orderId = 'ORD-123';
-      const existingPayment = { orderId, status: PaymentStatus.PAID } as Payment;
+      const existingPayment = Payment.create(orderId, 10000);
+      existingPayment.complete(); // Status: PAID
 
       vi.mocked(mockRepo.findByOrderId).mockResolvedValue(existingPayment);
 
       const result = await paymentService.updatePaymentStatus(orderId, PaymentStatus.PAID);
 
       expect(result).toBe(existingPayment);
-      expect(mockRepo.updateStatus).not.toHaveBeenCalled();
+      expect(mockRepo.save).toHaveBeenCalledTimes(0);
     });
   });
 });

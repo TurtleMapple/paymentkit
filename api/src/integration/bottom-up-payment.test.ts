@@ -5,6 +5,7 @@ import { PaymentService } from '../domain/services/payment.service';
 import { RabbitMQPaymentEventPublisher } from '../domain/services/rabbitmq/RabbitMQEventPublisher';
 import { closeRabbitMQConnection } from '../domain/services/rabbitmq/connection';
 import { PaymentStatus } from '../domain/entities/paymentStatus';
+import { Payment } from '../domain/entities/paymentEntity';
 import { env } from '../config/env';
 
 /**
@@ -48,17 +49,16 @@ describe('Bottom-Up Integration Test: Payment Module', () => {
     it('harus bisa menyimpan data pembayaran ke database asli', async () => {
       const orderId = 'repo-test-' + Date.now();
       
-      // Driver memanggil Repository langsung
-      const payment = await repository.create(
-        orderId,
-        25000,
-        'midtrans',
-        'Repository User',
-        'repo@example.com'
-      );
+      // Gunakan Entity Factory
+      const payment = Payment.create(orderId, 25000, 'midtrans');
+      payment.customerName = 'Repository User';
+      payment.customerEmail = 'repo@example.com';
+
+      // Simpan via repository
+      await repository.save(payment);
 
       expect(payment.orderId).toBe(orderId);
-      expect(payment.id).toBeDefined();
+      expect(payment.getId()).toBeDefined();
 
       // Pastikan benar-benar ada di tabel
       const found = await repository.findByOrderId(orderId);
@@ -68,18 +68,17 @@ describe('Bottom-Up Integration Test: Payment Module', () => {
 
     it('harus bisa mengupdate status pembayaran secara atomik', async () => {
       const orderId = 'repo-update-' + Date.now();
-      await repository.create(orderId, 10000);
+      const payment = Payment.create(orderId, 10000);
+      await repository.save(payment);
 
-      // Tes pindah status dari PENDING ke PAID
-      const result = await repository.updateStatusAtomicFromPending(
-        orderId,
-        PaymentStatus.PAID
-      );
+      // Tes pindah status dari PENDING ke PAID via Entity Method
+      payment.complete();
 
-      expect(result).toBe('SUCCESS');
+      // Terakhir simpan perubahan
+      await repository.save(payment);
       
       const updated = await repository.findByOrderId(orderId);
-      expect(updated?.status).toBe(PaymentStatus.PAID);
+      expect(updated?.getStatus()).toBe(PaymentStatus.PAID);
     });
   });
 
@@ -90,11 +89,6 @@ describe('Bottom-Up Integration Test: Payment Module', () => {
     it('harus menjalankan logika bisnis dan memicu Event Publisher', async () => {
       const orderId = 'service-test-' + Date.now();
       
-      /**
-       * Di sini Service memanggil Repository (bawahnya) 
-       * DAN memanggil RabbitMQ (eksternal).
-       * Ini adalah "Integrasi" antara Service -> Repository -> DB.
-       */
       const payment = await service.createPayment(
         orderId,
         50000,
@@ -103,12 +97,12 @@ describe('Bottom-Up Integration Test: Payment Module', () => {
         'service@example.com'
       );
 
-      expect(payment.status).toBe(PaymentStatus.PENDING);
+      expect(payment.getStatus()).toBe(PaymentStatus.PENDING);
       
       // Verifikasi Service berhasil menggunakan Repository di bawahnya
       const checkInDb = await repository.findByOrderId(orderId);
       expect(checkInDb).not.toBeNull();
-      expect(Number(checkInDb?.amount)).toBe(50000);
+      expect(Number(checkInDb?.getAmount())).toBe(50000);
     });
 
     it('harus menolak transisi status yang tidak valid (Business Rules)', async () => {

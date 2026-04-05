@@ -56,6 +56,7 @@ describe('Top-Down Integration Test: Payment API', () => {
         customer: {
           customerName: 'Top Down Test User',
           customerEmail: 'topdown@example.com',
+          phone: '08123456789',
         },
       };
 
@@ -74,16 +75,16 @@ describe('Top-Down Integration Test: Payment API', () => {
       
       // 4. Periksa isi jawaban (body) dari API
       const body = await res.json();
-      expect(body).toHaveProperty('orderId'); // Harus ada ID pesanan
-      expect(body.amount).toBe(paymentData.amount); // Jumlah uang harus sama
-      expect(body.status).toBe('PENDING'); // Status awal harus PENDING
+      expect(body.data).toHaveProperty('orderId'); // Harus ada ID pesanan
+      expect(body.data.amount).toBe(paymentData.amount); // Jumlah uang harus sama
+      expect(body.data.status).toBe('PENDING'); // Status awal harus PENDING
 
       // 5. Verifikasi langsung ke Database (Ciri khas Top-Down dengan Real DB)
       // "Apakah data yang tadi lewat API benar-benar masuk ke tabel database?"
       const em = ormInstance().em.fork();
-      const paymentInDb = await em.findOne(Payment, { orderId: body.orderId });
+      const paymentInDb = await em.findOne(Payment, { orderId: body.data.orderId });
       expect(paymentInDb).not.toBeNull(); // Data tidak boleh kosong
-      expect(Number(paymentInDb?.amount)).toBe(paymentData.amount); // Angkanya harus cocok
+      expect(Number(paymentInDb?.getAmount())).toBe(paymentData.amount); // Angkanya harus cocok
     });
 
     it('harus mengembalikan error 400 jika input tidak valid', async () => {
@@ -116,14 +117,11 @@ describe('Top-Down Integration Test: Payment API', () => {
   // KELOMPOK TES: Mengambil Detail Pembayaran
   describe('GET /payments/:orderId', () => {
     it('harus mengembalikan detail pembayaran untuk ID yang ada', async () => {
-      // 1. Persiapan: Masukkan data langsung ke DB agar ada data untuk ditarik
+      // 1. Persiapan: Masukkan data langsung ke DB via Static Factory
       const em = ormInstance().em.fork();
       const orderId = 'test-top-down-get-' + Date.now();
       
-      const payment = new Payment();
-      payment.orderId = orderId;
-      payment.amount = 100000;
-      payment.gateway = 'midtrans';
+      const payment = Payment.create(orderId, 100000, 'midtrans');
       payment.customerName = 'Getter User';
       payment.customerEmail = 'getter@example.com';
       

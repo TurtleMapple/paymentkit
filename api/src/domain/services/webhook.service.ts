@@ -1,62 +1,47 @@
-/**
- * WEBHOOK SERVICE
- * 
- * Business logic for webhook processing
- * Orchestrates gateway validation and payment updates
- */
-
-import { Context } from 'hono';
 import { PaymentService } from './payment.service';
 import { PaymentGateway } from '../gateways/IPaymentGateway';
 import { PaymentStatus } from '../entities/paymentStatus';
 import { Payment } from '../entities/paymentEntity';
 
-// ===== CONSTANTS =====
-
-const SIGNATURE_HEADERS = ['x-signature', 'x-midtrans-signature', 'x-callback-token'] as const;
-
-// ===== SERVICE =====
-
+/**
+ * WEBHOOK SERVICE (Application Service)
+ * 
+ * Tanggung Jawab:
+ * - Mengordinasi validasi notifikasi dari gateway pembayaran.
+ * - Memperbarui status pembayaran di sistem inti melalui PaymentService.
+ * - Stateless dan terlepas dari framework HTTP (Hono).
+ */
 export class WebhookService {
   constructor(private readonly paymentService: PaymentService) { }
 
   /**
-   * Extract signature from request headers
-   */
-  extractSignature(c: Context): string | undefined {
-    for (const header of SIGNATURE_HEADERS) {
-      const signature = c.req.header(header);
-      if (signature) return signature;
-    }
-    return undefined;
-  }
-
-  /**
-   * Process webhook with validation and state machine
+   * Use Case: Memproses notifikasi webhook dari gateway
+   * 
+   * @param gateway Instance adapter gateway yang sesuai (Midtrans, dll)
+   * @param payload Body mentah dari notifikasi gateway
+   * @param signature Signature untuk validasi keamanan
    */
   async processWebhook(
     gateway: PaymentGateway,
     payload: any,
     signature: string
   ): Promise<Payment> {
-    // 1. Validate webhook (gateway handles signature + required fields)
+    
+    // 1. Validasi Keaslian Webhook (Delegasi ke Gateway Adapter)
     const isValid = gateway.validateWebhook(payload, signature);
     if (!isValid) {
       throw new Error('Invalid webhook: missing required fields or invalid signature');
     }
 
-    // 2. Process webhook payload (gateway handles parsing)
+    // 2. Parsing Data (Translasi dari format vendor ke format domain internal)
     const webhookResult = await gateway.processWebhook(payload);
 
-    // 3. Update payment (PaymentService handles state machine + idempotency)
+    // 3. Update Status Pembayaran (Delegasi ke PaymentService / Entity logic)
     const payment = await this.paymentService.updatePaymentStatus(
       webhookResult.orderId,
-      // amazonq-ignore-next-line
-      // amazonq-ignore-next-line
-      // amazonq-ignore-next-line
       webhookResult.status as PaymentStatus,
       {
-        paymentType: webhookResult.paymentType,
+        type: webhookResult.paymentType,
         paidAt: webhookResult.paidAt,
         gatewayResponse: webhookResult.gatewayResponse,
       }

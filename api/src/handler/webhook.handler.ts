@@ -1,226 +1,75 @@
-/**
- * WEBHOOK HANDLER
- * 
- * Menangani notifikasi webhook dari payment gateway
- * Mengikuti prinsip SOLID dengan pemisahan tanggung jawab yang jelas
- * 
- * SOLID Principles Applied:
- * - (S)RP: Single Responsibility - Handler hanya orchestrate, logic di service
- * - (O)CP: Open/Closed - Mudah extend gateway baru tanpa ubah handler
- * - (L)SP: Liskov Substitution - Semua gateway implement interface yang sama
- * - (I)SP: Interface Segregation - Service punya interface yang focused
- * - (D)IP: Dependency Inversion - Depend on abstraction (PaymentGateway interface)
- */
-
 import { Context } from 'hono';
-import { Payment } from '../domain/entities/paymentEntity';
 import { PaymentGatewayFactory } from '../domain/gateways/PaymentGatewayFactory';
-
-// ===== TYPES =====
-
-/**
- * Gateway yang didukung sistem
- */
-type SupportedGateway = 'midtrans';
+import { buildSuccessResponse } from '../utils/api-response.util';
+import { HttpStatus } from '../utils/http-status.util';
+import { WebhookGatewayParam } from '../schemas/webhook.schema';
 
 /**
- * Response sukses webhook
+ * WEBHOOK HANDLER (Class-Based)
+ * 
+ * Fungsi:
+ * Menangani notifikasi webhook dari berbagai payment gateway terpusat.
+ * 
+ * Clean Code & SOLID:
+ * - Tidak ada routing error / classify error lagi (pindah ke Middleware).
+ * - Tidak ada helper lokal (pindah ke utils).
+ * - Menyuntikkan webhookService demi modularity testing.
  */
-interface WebhookSuccessResponse {
-  success: true;
-  message: string;
-  payment: {
-    orderId: string;
-    status: string;
-  };
-  processedAt: string;
-}
+export class WebhookHandler {
 
-/**
- * Response error webhook
- */
-interface WebhookErrorResponse {
-  success: false;
-  error: string;
-  details?: string;
-}
+  constructor(private readonly webhookService: any) {}
 
-// ===== RESPONSE BUILDERS (SRP: Separate response formatting) =====
+  /**
+   * Mengekstrak signature webhook dari Headers HTTP Hono
+   * @private
+   */
+  private extractSignature(c: Context): string | null {
+    const headers = [
+      'x-signature',
+      'x-midtrans-signature',
+      'x-callback-token',
+      'x-hub-signature',
+    ];
 
-/**
- * Membuat response sukses webhook
- */
-function buildSuccessResponse(payment: Payment): WebhookSuccessResponse {
-  return {
-    success: true,
-    message: `Webhook berhasil diproses untuk order ${payment.orderId}`,
-    payment: {
-      orderId: payment.orderId,
-      status: payment.status,
-    },
-    processedAt: new Date().toISOString(),
-  };
-}
-
-/**
- * Membuat response error webhook
- */
-function buildErrorResponse(error: string, details?: string): WebhookErrorResponse {
-  return {
-    success: false,
-    error,
-    ...(details && { details }),
-  };
-}
-
-// ===== ERROR CLASSIFIER (SRP: Separate error handling logic) =====
-
-/**
- * Klasifikasi error dan tentukan HTTP status code
- */
-function classifyError(error: any): { statusCode: number; message: string; details?: string } {
-  const errorMessage = error.message || 'Unknown error';
-
-  if (errorMessage.includes('Payment not found') || errorMessage.includes('not found')) {
-    return {
-      statusCode: 404,
-      message: 'Payment tidak ditemukan',
-      details: errorMessage,
-    };
-  }
-
-  if (errorMessage.includes('Invalid signature') || errorMessage.includes('signature')) {
-    return {
-      statusCode: 401,
-      message: 'Signature webhook tidak valid',
-      details: errorMessage,
-    };
-  }
-
-  if (errorMessage.includes('Invalid transition') || errorMessage.includes('transition')) {
-    return {
-      statusCode: 400,
-      message: 'Transisi status tidak valid',
-      details: errorMessage,
-    };
-  }
-
-  if (errorMessage.includes('not supported') || errorMessage.includes('Unknown gateway')) {
-    return {
-      statusCode: 400,
-      message: 'Gateway tidak didukung',
-      details: errorMessage,
-    };
-  }
-
-  if (errorMessage.includes('Invalid webhook') || errorMessage.includes('required')) {
-    return {
-      statusCode: 400,
-      message: 'Payload webhook tidak valid',
-      details: errorMessage,
-    };
-  }
-
-  return {
-    statusCode: 500,
-    message: 'Gagal memproses webhook',
-    details: errorMessage,
-  };
-}
-
-// ===== SIGNATURE EXTRACTOR (SRP: Separate signature extraction) =====
-
-/**
- * Extract signature dari request headers
- * Mendukung berbagai format header dari gateway berbeda
- */
-function extractSignature(c: Context): string | null {
-  const headers = [
-    'x-signature',
-    'x-midtrans-signature',
-    'x-callback-token',
-    'x-hub-signature',
-  ];
-
-  for (const header of headers) {
-    const signature = c.req.header(header);
-    if (signature) {
-      return signature;
+    for (const header of headers) {
+      const signature = c.req.header(header);
+      if (signature) {
+        return signature;
+      }
     }
+    return null;
   }
 
-  return null;
-}
-
-// ===== MAIN HANDLER (OCP: Open for extension via services) =====
-
-/**
- * Handler utama untuk webhook endpoint
- * 
- * Endpoint: POST /webhooks/:gateway
- * 
- * Flow:
- * 1. Extract signature dari headers
- * 2. Validasi signature ada
- * 3. Get gateway instance dari factory
- * 4. Process webhook via service (validasi + update)
- * 5. Return response
- */
-export async function handleWebhook(
-  c: Context,
-  gateway: SupportedGateway,
-  body: any
-) {
-  const webhookService = c.get('webhookService');
-
-  try {
-    const signature = extractSignature(c);
+  /**
+   * Handler utama untuk endpoint Webhook
+   * Endpoint: POST /webhooks/:gateway
+   */
+  handleWebhook = async (c: Context, gatewayParam: WebhookGatewayParam, body: any) => {
+    // 1. Dapatkan signature (Fail Fast jika tidak ada)
+    const signature = this.extractSignature(c);
     if (!signature) {
-      return c.json(
-        buildErrorResponse(
-          'Signature header tidak ditemukan',
-          'Header x-signature atau x-midtrans-signature diperlukan'
-        ),
-        401
-      );
+      throw new Error('Signature header tidak ditemukan'); // Otomatis ke-401 di middleware
     }
 
-    const gatewayInstance = PaymentGatewayFactory.create(gateway);
+    // 2. Tentukan gateway dari URL parameter
+    const gatewayInstance = PaymentGatewayFactory.create(gatewayParam.gateway);
 
-    const payment = await webhookService.processWebhook(
+    // 3. Proses di service utama
+    const payment = await this.webhookService.processWebhook(
       gatewayInstance,
       body,
       signature
     );
 
-    return c.json(buildSuccessResponse(payment), 200);
+    // 4. Return respon sukses seragam
+    const payloadInfo = {
+      orderId: payment.orderId,
+      status: payment.getStatus()
+    };
 
-  } catch (error: any) {
-    const { statusCode, message, details } = classifyError(error);
-
-    console.error('[Webhook Handler] Error:', {
-      gateway,
-      orderId: body?.orderId || body?.order_id,
-      error: error.message,
-      stack: error.stack,
-    });
-
-    // Fix: Cast statusCode ke type yang Hono expect
     return c.json(
-      buildErrorResponse(message, details),
-      statusCode as 400 | 401 | 404 | 500
+      buildSuccessResponse(payloadInfo, `Webhook berhasil diproses untuk pesanan ${payment.orderId}`),
+      HttpStatus.OK
     );
   }
 }
-
-// ===== TESTABILITY EXPORTS =====
-
-/**
- * Export helper functions untuk testing
- */
-export const WebhookHandlerHelpers = {
-  buildSuccessResponse,
-  buildErrorResponse,
-  classifyError,
-  extractSignature,
-};

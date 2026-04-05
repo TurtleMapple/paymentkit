@@ -3,136 +3,82 @@ import { CreatePaymentInput, GetAllPaymentsQuery } from "../schemas/payment.sche
 import { mapPaymentToResponse } from "../utils/formatters/payment-response.formatter";
 import { PaymentStatus } from "../domain/entities/paymentStatus";
 import { v7 as uuidv7 } from 'uuid';
-
-// ===== CONSTANTS (OCP: Centralized configuration) =====
-const PAYMENT_GATEWAY = 'midtrans';
-const DEFAULT_PAGE = 1;
-const DEFAULT_LIMIT = 10;
-
-// ===== HELPER FUNCTIONS (SRP: Separate response formatting) =====
+import { buildSuccessResponse, buildPaginatedResponse } from "../utils/api-response.util";
+import { HttpStatus } from "../utils/http-status.util";
 
 /**
- * Creates success response with wrapper
- */
-function createSuccessResponse(data: any) {
-  return {
-    success: true as const,
-    data,
-  };
-}
-
-/**
- * Creates success response with pagination
- */
-function createPaginatedResponse(data: any[], page: number, limit: number, total: number) {
-  return {
-    success: true as const,
-    data,
-    pagination: {
-      page,
-      limit,
-      total,
-    },
-  };
-}
-
-/**
- * Creates error response
- */
-function createErrorResponse(message: string) {
-  return {
-    error: message,
-  };
-}
-
-// ===== HANDLERS =====
-
-/**
- * POST /payments handler
- * Creates payment and publishes to RabbitMQ for async processing
+ * PAYMENT HANDLER (Class-Based)
  * 
- * @param c - Hono context
- * @param input - Validated payment input
+ * SOLID Principles:
+ * - SRP: Fokus mengatur alur HTTP (Input -> Service -> Format -> Respon).
+ * - DIP: Menerima PaymentService via Dependency Injection agar mudah di-test.
+ * 
+ * Clean Code:
+ * - Tidak ada lagi try-catch (ditangani Global Error Middleware).
  */
-export async function createPaymentHandler(
-  c: Context,
-  input: CreatePaymentInput
-) {
-  const service = c.get('paymentService');
+export class PaymentHandler {
+  
+  // Dependency Injection: Service dimasukkan melalui constructor
+  constructor(private readonly paymentService: any) {}
 
-  try {
-    // Auto-generate orderId using UUID v7
+  /**
+   * POST /payments
+   * Creates a new payment and initiates async processing
+   */
+  createPayment = async (c: Context, input: CreatePaymentInput) => {
     const orderId = uuidv7();
 
-    // Create payment in DB and publish to RabbitMQ
-    const payment = await service.createPayment(
+    // Default gateway untuk saat ini diset ke 'midtrans' 
+    // (Bisa dikonfigurasi melalui input schema jika diaktifkan)
+    const payment = await this.paymentService.createPayment(
       orderId,
       input.amount,
-      PAYMENT_GATEWAY,
-      input.customer.customerName,
-      input.customer.customerEmail
+      'midtrans',
+      input.customer.customerName,    
+      input.customer.customerEmail    
     );
 
-    // Worker will process message and call Midtrans
-    // Return immediately with PENDING status
+    // Langsung mereturn Success Response, jika terjadi error seperti Order ID duplikat,
+    // maka ia akan dilempar ke Global Error Handler menjadi 409 Conflict.
+    return c.json(
+      buildSuccessResponse(mapPaymentToResponse(payment), 'Payment created successfully'),
+      HttpStatus.CREATED
+    );
+  }
 
-    return c.json(mapPaymentToResponse(payment), 201);
-  } catch (error: any) {
-    if (error.message === 'Order ID already exists') {
-      return c.json(createErrorResponse(error.message), 409);
+  /**
+   * GET /payments/:orderId
+   * Retrieves specific payment details (polling endpoint)
+   */
+  getPaymentByOrderId = async (c: Context, orderId: string) => {
+    const payment = await this.paymentService.getPaymentByOrderId(orderId);
+
+    if (!payment) {
+      // Akan ditangkap middleware sebagai 404
+      throw new Error('Payment not found'); 
     }
-    throw error;
-  }
-}
 
-/**
- * GET /payments/:orderId handler
- * Retrieves payment details by order ID (polling endpoint)
- * 
- * @param c - Hono context
- * @param orderId - Order ID from path parameter
- */
-export async function getPaymentByOrderIdHandler(
-  c: Context,
-  orderId: string
-) {
-  const service = c.get('paymentService');
-
-  const payment = await service.getPaymentByOrderId(orderId);
-
-  if (!payment) {
-    return c.json(createErrorResponse('Payment not found'), 404);
+    return c.json(
+      buildSuccessResponse(mapPaymentToResponse(payment), 'Payment retrieved successfully'),
+      HttpStatus.OK
+    );
   }
 
-  return c.json(createSuccessResponse(mapPaymentToResponse(payment)), 200);
-}
+  /**
+   * GET /payments
+   * Retrieves all payments with pagination and optional filtering
+   */
+  getAllPayments = async (c: Context, query: GetAllPaymentsQuery) => {
+    const page = query.page || 1;
+    const limit = query.limit || 10;
+    const status = query.status as PaymentStatus | undefined;
 
-/**
- * GET /payments handler
- * Retrieves all payments with pagination and optional filtering
- * 
- * @param c - Hono context
- * @param query - Validated query parameters
- */
-export async function getAllPaymentsHandler(
-  c: Context,
-  query: GetAllPaymentsQuery
-) {
-  const service = c.get('paymentService');
+    const { data, total } = await this.paymentService.getAllPayments({ page, limit, status });
+    const mappedData = data.map(mapPaymentToResponse);
 
-  const page = query.page || DEFAULT_PAGE;
-  const limit = query.limit || DEFAULT_LIMIT;
-
-  const { data, total } = await service.getAllPayments({
-    page,
-    limit,
-    status: query.status as PaymentStatus | undefined,
-  });
-
-  const mappedData = data.map(mapPaymentToResponse);
-
-  return c.json(
-    createPaginatedResponse(mappedData, page, limit, total),
-    200
-  );
+    return c.json(
+      buildPaginatedResponse(mappedData, page, limit, total, 'Payments retrieved successfully'),
+      HttpStatus.OK
+    );
+  }
 }

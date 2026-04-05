@@ -2,22 +2,27 @@ import { Payment } from '../entities/paymentEntity';
 import { PaymentStatus } from '../entities/paymentStatus';
 
 export interface IPaymentRepository {
+  /**
+   * Mendapatkan data pembayaran berdasarkan Order ID
+   */
   findByOrderId(orderId: string): Promise<Payment | null>;
-  create(
-    orderId: string,
-    amount: number,
-    gateway: string,
-    customerName?: string,
-    customerEmail?: string
-  ): Promise<Payment>;
-  updateStatus(
-    orderId: string,
-    status: PaymentStatus,
-    paymentData?: Partial<Payment>
-  ): Promise<Payment>;
+
+  /**
+   * Menyimpan (insert or update) pembayaran ke database
+   */
+  save(payment: Payment): Promise<void>;
+
+  /**
+   * Mendapatkan daftar pembayaran dengan pagination dan filter
+   */
   findAllWithCount(options?: {
     page?: number;
     limit?: number;
     status?: PaymentStatus;
   }): Promise<{ data: Payment[]; total: number }>;
+
+  /**
+   * Menghapus pembayaran (biasanya soft delete)
+   */
+  delete(payment: Payment): Promise<void>;
 }
