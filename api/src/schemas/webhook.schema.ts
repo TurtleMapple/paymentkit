@@ -30,7 +30,7 @@ export const WebhookResponseSchema = z.object({
  * Digunakan untuk endpoint POST /webhooks/:gateway
  */
 export const WebhookGatewayParamSchema = z.object({
-  gateway: z.string().min(1).describe('Payment Gateway (midtrans, xendit, dll)')
+  gateway: z.enum(['midtrans', 'xendit']).describe('Payment Gateway (midtrans, xendit)')
 });
 
 /**

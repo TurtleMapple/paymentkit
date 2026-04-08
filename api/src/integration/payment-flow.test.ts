@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import app from '../app';
 import { initDatabase, orm } from '../config/db';
-import { setupTopology } from '../domain/services/rabbitmq/topology';
+import { RabbitMQTopology } from '../domain/services/rabbitmq/topology';
+import { RabbitMQChannelManager } from '../domain/services/rabbitmq/channel';
 import { closeRabbitMQConnection } from '../domain/services/rabbitmq/connection';
 import { Payment } from '../domain/entities/paymentEntity';
 import { env } from '../config/env';
@@ -21,7 +22,8 @@ describe('Big Bang Integration Test: Payment Flow', () => {
       
       // 3. Setup RabbitMQ Topology
       if (env.RABBITMQ_ENABLED) {
-          await setupTopology();
+          const channel = await RabbitMQChannelManager.getPublisherChannel();
+          await RabbitMQTopology.setup(channel);
           console.log('RabbitMQ setup completed');
       }
       console.log('--- SETUP FINISHED ---');

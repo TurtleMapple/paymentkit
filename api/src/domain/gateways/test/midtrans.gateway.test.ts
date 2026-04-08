@@ -26,7 +26,7 @@ describe('MidtransPaymentGateway', () => {
     });
 
     describe('createPayment', () => {
-        it('should successfully create a payment link and pass idempotency key', async () => {
+        it('harus berhasil membuat link pembayaran dan menyertakan idempotency key', async () => {
             const mockResponse = {
                 ok: true,
                 json: vi.fn().mockResolvedValue({
@@ -57,7 +57,7 @@ describe('MidtransPaymentGateway', () => {
             );
         });
 
-        it('should fall back to orderId if idempotencyKey is not provided', async () => {
+        it('harus menggunakan orderId sebagai fallback jika idempotencyKey tidak diberikan', async () => {
             const mockResponse = {
                 ok: true,
                 json: vi.fn().mockResolvedValue({
@@ -82,7 +82,7 @@ describe('MidtransPaymentGateway', () => {
             );
         });
 
-        it('should throw GatewayAuthException strictly on 401 error', async () => {
+        it('harus melempar GatewayAuthException secara ketat pada error 401', async () => {
             const mockResponse = {
                 ok: false,
                 status: 401,
@@ -98,7 +98,7 @@ describe('MidtransPaymentGateway', () => {
             })).rejects.toThrow(GatewayAuthException);
         });
 
-        it('should throw GatewayValidationException on 400 Bad Request error', async () => {
+        it('harus melempar GatewayValidationException pada error 400 Bad Request', async () => {
             const mockResponse = {
                 ok: false,
                 status: 400,
@@ -116,7 +116,7 @@ describe('MidtransPaymentGateway', () => {
     });
 
     describe('checkStatus', () => {
-        it('should map status properly from Midtrans response', async () => {
+        it('harus memetakan status dengan benar dari respon Midtrans', async () => {
              const mockResponse = {
                 ok: true,
                 json: vi.fn().mockResolvedValue({
@@ -134,7 +134,7 @@ describe('MidtransPaymentGateway', () => {
             expect(result.status).toBe(PaymentStatus.PAID); 
         });
 
-        it('should return PENDING if order is not found (404) natively in CheckStatus', async () => {
+        it('harus mengembalikan PENDING jika pesanan tidak ditemukan (404) secara native di CheckStatus', async () => {
              const mockResponse = {
                 ok: false,
                 status: 404,

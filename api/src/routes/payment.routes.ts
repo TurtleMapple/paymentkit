@@ -11,7 +11,20 @@ import {
 import { ErrorResponseSchema } from '../schemas/shared.schema';
 import { PaymentHandler } from '../handler/payment.handler';
 
-const payment = new OpenAPIHono<{ Variables: { paymentService: any } }>();
+const payment = new OpenAPIHono<{ Variables: { paymentService: any } }>({
+  defaultHook: (result, c) => {
+    if (!result.success) {
+      return c.json({
+        success: false,
+        message: 'Validation failed',
+        errors: result.error.issues.map((e: any) => ({
+          field: e.path.join('.'),
+          message: e.message
+        }))
+      }, 400);
+    }
+  }
+});
 
 // Custom validation error hook
 const validationHook = (result: any, c: any) => {
@@ -36,8 +49,15 @@ const createPaymentRoute = createRoute({
   method: 'post',
   path: '/',
   tags: ['Payments'],
-  summary: 'Create Payment',
-  description: 'Creates a new payment and publishes to RabbitMQ for async processing',
+  summary: 'Membuat Pembayaran Baru',
+  description: `Endpoint utama untuk memulai proses pembayaran.
+  
+  Sistem akan melakukan:
+  1. Validasi input (Order ID, Amount, Gateway).
+  2. Menyimpan data pembayaran awal dengan status PENDING ke database.
+  3. Mengirimkan pesan (Publish) ke asinkron worker (RabbitMQ) untuk membuat link pembayaran di sisi vendor.
+  
+  Gunakan endpoint GET /v1/payments/{orderId} setelah ini untuk memantau apakah link pembayaran sudah berhasil dibuat.`,
   operationId: 'createPayment',
   request: {
     body: {
@@ -75,8 +95,13 @@ const getAllPaymentsRoute = createRoute({
   method: 'get',
   path: '/',
   tags: ['Payments'],
-  summary: 'Get All Payments',
-  description: 'Retrieves all payments with pagination and optional filtering',
+  summary: 'Daftar Semua Pembayaran',
+  description: `Mengambil daftar seluruh riwayat pembayaran yang tersimpan di sistem.
+  
+  Mendukung:
+  - **Paginasi**: Gunakan parameter 'page' dan 'limit'.
+  - **Filter Status**: Mencari data berdasarkan status tertentu (PAID, PENDING, dll).
+  - **Urutan**: Data dikembalikan dengan urutan terbaru ke terlama secara otomatis.`,
   operationId: 'getAllPayments',
   request: {
     query: GetAllPaymentsQuerySchema,
@@ -100,8 +125,13 @@ const getPaymentRoute = createRoute({
   method: 'get',
   path: '/{orderId}',
   tags: ['Payments'],
-  summary: 'Get Payment by Order ID',
-  description: 'Retrieves payment details by order ID (polling endpoint)',
+  summary: 'Detail Pembayaran Berdasarkan Order ID',
+  description: `Mengambil informasi lengkap sebuah pembayaran menggunakan Order ID.
+  
+  Gunakan endpoint ini untuk:
+  - Polling status pembayaran dari sisi aplikasi Frontend.
+  - Mendapatkan link pembayaran (Snap/Payment Link) setelah worker selesai memproses di background.
+  - Melacak status transaksi terakhir (PAID, FAILED, EXPIRED).`,
   operationId: 'getPaymentByOrderId',
   request: {
     params: OrderIdParamSchema,

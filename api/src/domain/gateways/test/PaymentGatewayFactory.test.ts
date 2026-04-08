@@ -3,20 +3,20 @@ import { PaymentGatewayFactory } from '../PaymentGatewayFactory';
 import { MidtransPaymentGateway } from '../MidtransPaymentGateway';
 
 describe('PaymentGatewayFactory', () => {
-  it('should create MidtransPaymentGateway when requested', () => {
+  it('harus membuat MidtransPaymentGateway ketika diminta', () => {
     const gateway = PaymentGatewayFactory.create('midtrans');
     
     expect(gateway).toBeInstanceOf(MidtransPaymentGateway);
     expect(gateway.name).toBe('midtrans');
   });
 
-  it('should be case-insensitive for gateway names', () => {
+  it('harus mengabaikan perbedaan huruf besar/kecil pada nama gateway', () => {
     const gateway = PaymentGatewayFactory.create('MIDTRANS');
     
     expect(gateway).toBeInstanceOf(MidtransPaymentGateway);
   });
 
-  it('should return the SAME instance (Singleton Pattern)', () => {
+  it('harus mengembalikan instance yang SAMA (Singleton Pattern)', () => {
     const instance1 = PaymentGatewayFactory.create('midtrans');
     const instance2 = PaymentGatewayFactory.create('midtrans');
     
@@ -24,7 +24,7 @@ describe('PaymentGatewayFactory', () => {
     expect(instance1).toBe(instance2);
   });
 
-  it('should throw error for unsupported gateway', () => {
+  it('harus melempar error jika gateway tidak didukung', () => {
     expect(() => {
       PaymentGatewayFactory.create('not-supported-gateway');
     }).toThrow(/is not supported/);

@@ -1,132 +1,94 @@
-import { getRabbitMQChannel } from './channel'
-import { logger } from '../../../utils/logger'
+import { Channel } from 'amqplib';
+import { logger } from '../../../utils/logger';
 
 /**
- * ============================================
- * RABBITMQ TOPOLOGY CONSTANTS
- * ============================================
- * Centralized configuration untuk exchanges, queues, dan routing keys
+ * RABBITMQ REGISTRY (Constants)
+ *
+ * @standarisasi
+ * - Naming Convention: lowercase + dot separator (${service}.${purpose})
+ * - Registry Pattern: Sentralisasi nama Exchange, Queue, dan Routing Key.
+ * - Idempotensi: Menggunakan assert agar infrastruktur dibuat otomatis jika belum ada.
  */
 
+// ─── EXCHANGES ───────────────────────────────────────────────
 export const EXCHANGES = {
-    PAYMENT: 'payment.exchange',
-    PAYMENT_DLX: 'payment.dlx',
-} as const
+  /** Main exchange untuk routing pesan payment (topic) */
+  PAYMENT: 'payment.exchange',
+  /** Dead Letter Exchange — menampung pesan yang gagal diproses setelah max retry */
+  PAYMENT_DLX: 'payment.dlx',
+} as const;
 
+// ─── QUEUES ──────────────────────────────────────────────────
 export const QUEUES = {
-    PAYMENT_CREATED: 'payment.created.queue',
-    PAYMENT_UPDATED: 'payment.updated.queue',
-    PAYMENT_WEBHOOK: 'payment.webhook.queue',
-    PAYMENT_DLQ: 'payment.dlq',
-} as const
+  /** Antrean untuk memproses pembuatan payment baru (consumer utama) */
+  PAYMENT_CREATED: 'payment.process_created',
+  /** Antrean untuk memproses update status payment */
+  PAYMENT_UPDATED: 'payment.process_updated',
+  /** Antrean untuk memproses webhook yang diterima */
+  PAYMENT_WEBHOOK: 'payment.process_webhook',
+  /** Dead Letter Queue — pesan yang sudah tidak bisa di-retry */
+  PAYMENT_DLQ: 'payment.dead_letter',
+} as const;
 
+// ─── ROUTING KEYS ────────────────────────────────────────────
 export const ROUTING_KEYS = {
-    PAYMENT_CREATED: 'payment.created',
-    PAYMENT_UPDATED: 'payment.updated',
-    PAYMENT_WEBHOOK: 'payment.webhook',
-} as const
+  PAYMENT_CREATED: 'payment.created',
+  PAYMENT_UPDATED: 'payment.updated',
+  PAYMENT_WEBHOOK: 'payment.webhook',
+} as const;
 
 /**
- * ============================================
- * SETUP RABBITMQ TOPOLOGY
- * ============================================
- * 
- * Function ini akan:
- * 1. DECLARE EXCHANGES (payment.exchange & payment.dlx)
- * 2. DECLARE QUEUES (payment.created.queue, dll)
- * 3. BIND QUEUES TO EXCHANGES (routing message dari exchange ke queue)
- * 
+ * RABBITMQ TOPOLOGY SETUP
+ *
+ * @standarisasi
+ * - Durability: durable: true — survive broker restart.
+ * - Dead Letter Exchange (DLX): Mengarahkan pesan gagal ke DLQ.
+ * - Persistent Messages: Pesan disimpan ke disk oleh broker.
+ *
  * @architecture
- * Publisher → Exchange → Routing Key → Queue → Consumer
- *                                        ↓ (on error)
- *                                       DLQ
+ * Publisher → payment.exchange → [routing key] → payment.process_* → Consumer
+ *                                                      ↓ (nack, max retry)
+ *                                                 payment.dlx → payment.dead_letter
  */
-export async function setupTopology() {
-    const channel = await getRabbitMQChannel()
-    
-    logger.info('Setting up RabbitMQ topology...')
-    
-    // ============================================
-    // STEP 1: DECLARE MAIN EXCHANGE
-    // ============================================
-    // Exchange ini akan menerima message dari publisher
-    // dan routing ke queue berdasarkan routing key
-    await channel.assertExchange(EXCHANGES.PAYMENT, 'topic', {
-        durable: true, // Survive RabbitMQ restart
-    })
-    
-    // ============================================
-    // STEP 2: DECLARE DLX EXCHANGE
-    // ============================================
-    // Dead Letter Exchange untuk handle failed messages
-    logger.debug(`Declaring DLX exchange: ${EXCHANGES.PAYMENT_DLX} (type: fanout)`)
-    await channel.assertExchange(EXCHANGES.PAYMENT_DLX, 'fanout', {
-        durable: true,
-    })
-    
-    // ============================================
-    // STEP 3: DECLARE DEAD LETTER QUEUE
-    // ============================================
-    logger.debug(`Declaring DLQ: ${QUEUES.PAYMENT_DLQ}`)
-    await channel.assertQueue(QUEUES.PAYMENT_DLQ, {
-        durable: true,
-    })
-    
-    // ============================================
-    // STEP 4: BIND DLQ TO DLX
-    // ============================================
-    logger.debug(`Binding ${QUEUES.PAYMENT_DLQ} to ${EXCHANGES.PAYMENT_DLX}`)
-    await channel.bindQueue(QUEUES.PAYMENT_DLQ, EXCHANGES.PAYMENT_DLX, '')
-    
-    // ============================================
-    // STEP 5: DECLARE MAIN QUEUES
-    // ============================================
-    const queueOptions = {
-        durable: true,
-        deadLetterExchange: EXCHANGES.PAYMENT_DLX, // Failed messages → DLX
-    }
-    
-    logger.debug(`Declaring queue: ${QUEUES.PAYMENT_CREATED}`)
-    await channel.assertQueue(QUEUES.PAYMENT_CREATED, queueOptions)
-    
-    logger.debug(`Declaring queue: ${QUEUES.PAYMENT_UPDATED}`)
-    await channel.assertQueue(QUEUES.PAYMENT_UPDATED, queueOptions)
-    
-    logger.debug(`Declaring queue: ${QUEUES.PAYMENT_WEBHOOK}`)
-    await channel.assertQueue(QUEUES.PAYMENT_WEBHOOK, queueOptions)
-    
-    // ============================================
-    // STEP 6: BIND QUEUES TO MAIN EXCHANGE
-    // ============================================
-    // Binding ini yang menghubungkan exchange dengan queue
-    // Message dengan routing key 'payment.created' akan masuk ke PAYMENT_CREATED queue
-    
-    await channel.bindQueue(
-        QUEUES.PAYMENT_CREATED,
-        EXCHANGES.PAYMENT,
-        ROUTING_KEYS.PAYMENT_CREATED
-    )
-    
-    await channel.bindQueue(
-        QUEUES.PAYMENT_UPDATED,
-        EXCHANGES.PAYMENT,
-        ROUTING_KEYS.PAYMENT_UPDATED
-    )
-    
-    await channel.bindQueue(
-        QUEUES.PAYMENT_WEBHOOK,
-        EXCHANGES.PAYMENT,
-        ROUTING_KEYS.PAYMENT_WEBHOOK
-    )
+export class RabbitMQTopology {
+  /**
+   * Mendeklarasikan seluruh infrastruktur RabbitMQ (idempotent).
+   * Aman dipanggil berulang kali — assert tidak menimpa konfigurasi yang sudah ada.
+   */
+  public static async setup(channel: Channel): Promise<void> {
+    logger.info('🚀 Setting up RabbitMQ Topology (Exchanges, Queues, Bindings)...');
 
-    logger.success('RabbitMQ topology setup complete!')
-    
-    if (logger.debug.name) { // Simple check to only show details if debug might be active
-        logger.debug('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
-        logger.debug(`   Main Exchange: ${EXCHANGES.PAYMENT} (topic)`)
-        logger.debug(`   DLX Exchange: ${EXCHANGES.PAYMENT_DLX} (fanout)`)
-        logger.debug(`   Queues: ${Object.values(QUEUES).join(', ')}`)
-        logger.debug(`   Routing Keys: ${Object.values(ROUTING_KEYS).join(', ')}`)
-        logger.debug('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+    try {
+      // ── 1. Dead Letter Infrastructure ──────────────────────
+      await channel.assertExchange(EXCHANGES.PAYMENT_DLX, 'fanout', { durable: true });
+      await channel.assertQueue(QUEUES.PAYMENT_DLQ, { durable: true });
+      await channel.bindQueue(QUEUES.PAYMENT_DLQ, EXCHANGES.PAYMENT_DLX, '');
+
+      // ── 2. Main Exchange ───────────────────────────────────
+      await channel.assertExchange(EXCHANGES.PAYMENT, 'topic', { durable: true });
+
+      // ── 3. Main Queues ─────────────────────────────────────
+      const queueOptions = {
+        durable: true,
+        deadLetterExchange: EXCHANGES.PAYMENT_DLX,
+      };
+
+      await channel.assertQueue(QUEUES.PAYMENT_CREATED, queueOptions);
+      await channel.assertQueue(QUEUES.PAYMENT_UPDATED, queueOptions);
+      await channel.assertQueue(QUEUES.PAYMENT_WEBHOOK, queueOptions);
+
+      // ── 4. Bindings ────────────────────────────────────────
+      await channel.bindQueue(QUEUES.PAYMENT_CREATED, EXCHANGES.PAYMENT, ROUTING_KEYS.PAYMENT_CREATED);
+      await channel.bindQueue(QUEUES.PAYMENT_UPDATED, EXCHANGES.PAYMENT, ROUTING_KEYS.PAYMENT_UPDATED);
+      await channel.bindQueue(QUEUES.PAYMENT_WEBHOOK, EXCHANGES.PAYMENT, ROUTING_KEYS.PAYMENT_WEBHOOK);
+
+      logger.success('✅ RabbitMQ Topology setup complete');
+      logger.debug(`   Exchanges: ${Object.values(EXCHANGES).join(', ')}`);
+      logger.debug(`   Queues: ${Object.values(QUEUES).join(', ')}`);
+      logger.debug(`   Routing Keys: ${Object.values(ROUTING_KEYS).join(', ')}`);
+    } catch (error) {
+      logger.error('❌ Failed to setup RabbitMQ Topology:', error);
+      throw error;
     }
+  }
 }

@@ -9,13 +9,24 @@ import type { EntityManager } from '@mikro-orm/core';
 import { serviceInjection } from './middleware/service.middleware';
 import { PaymentService } from './domain/services/payment.service';
 import { WebhookService } from './domain/services/webhook.service';
+import { env } from './config/env';
 
+/**
+ * DEFINISI TYPE UNTUK HONO CONTEXT
+ */
 type Variables = {
   em: EntityManager;
   paymentService: PaymentService;
   webhookService: WebhookService;
 };
 
+/**
+ * INISIALISASI APLIKASI UTAMA
+ * 
+ * File ini HANYA mendefinisikan aplikasi HTTP (routes, middleware, error handler).
+ * Tidak ada side-effect (startup, shutdown, koneksi DB/MQ) di sini.
+ * Lifecycle management ditangani oleh server.ts (entry point).
+ */
 const app = new OpenAPIHono<{ Variables: Variables }>({
   defaultHook: (result, c) => {
     if (!result.success) {
@@ -31,56 +42,57 @@ const app = new OpenAPIHono<{ Variables: Variables }>({
   }
 });
 
-// CORS middleware
+// 1. GLOBAL MIDDLEWARES
 app.use("*", async (c, next) => {
   c.header("Access-Control-Allow-Origin", "*");
   c.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  c.header(
-    "Access-Control-Allow-Headers",
-    "Content-Type, Authorization, x-api-key",
-  );
-
-  if (c.req.method === "OPTIONS") {
-    return c.text("", 200);
-  }
-
+  c.header("Access-Control-Allow-Headers", "Content-Type, Authorization, x-api-key");
+  if (c.req.method === "OPTIONS") return c.text("", 200);
   await next();
 });
 
-// EntityManager middleware - inject em ke context
+// Inject DB & Services ke semua rute
 app.use('*', async (c, next) => {
   c.set('em', getEntityManager());
   await next();
 });
-
-// Service Injection middleware
 app.use('*', serviceInjection);
 
-// Health check (tanpa auth)
+/**
+ * 2. HEALTH CHECK (Root Level)
+ */
 app.openapi(
   {
     method: 'get',
     path: '/health',
-    responses: {
-      200: {
-        description: 'Health check response',
-      },
-    },
+    responses: { 200: { description: 'Health check response' } },
   },
-  (c) => {
-    return c.json({ status: 'ok', timestamp: new Date().toISOString() });
-  }
+  (c) => c.json({ status: 'ok', timestamp: new Date().toISOString() })
 );
 
-// API Key middleware untuk semua routes kecuali health & docs
-app.use('/payments/*', apiKeyAuth);
-app.use('/webhooks/*', apiKeyAuth);
+/**
+ * 3. GRUP RUTE V1 (Base Path: /v1)
+ */
+const v1 = new OpenAPIHono<{ Variables: Variables }>();
 
-// Routes
-app.route('/payments', paymentRoutes);
-app.route('/webhooks', webhookRoutes);
+v1.use('/payments/*', apiKeyAuth);
+v1.use('/webhooks/*', apiKeyAuth);
 
-// OpenAPI JSON with security scheme
+v1.route('/payments', paymentRoutes);
+v1.route('/webhooks', webhookRoutes);
+
+app.route('/v1', v1);
+
+/**
+ * 4. DOKUMENTASI & OPENAPI
+ */
+// Registrasi Security Scheme (API Key) secara global di OpenAPI
+app.openAPIRegistry.registerComponent('securitySchemes', 'ApiKeyAuth', {
+  type: 'apiKey',
+  in: 'header',
+  name: 'x-api-key',
+});
+
 app.doc('/doc', {
   openapi: '3.0.0',
   info: {
@@ -88,32 +100,24 @@ app.doc('/doc', {
     title: 'Payment API',
     description: 'Payment Gateway API with RabbitMQ integration',
   },
-  servers: [
-    {
-      url: 'http://localhost:3000',
-      description: 'Development server',
-    },
-  ],
+  servers: [{ url: `http://localhost:${env.PORT}`, description: 'Development server' }],
+  // Terapkan security secara global agar muncul di UI untuk semua rute
+  security: [{ ApiKeyAuth: [] }],
 });
 
-// Scalar API Documentation UI with authentication
 app.get(
   '/reference',
   apiReference({
     theme: 'purple',
-    spec: {
-      url: '/doc',
-    },
+    spec: { url: '/doc' },
     authentication: {
       preferredSecurityScheme: 'ApiKeyAuth',
-      apiKey: {
-        token: '',
-      },
+      apiKey: { token: env.API_KEY }, // Otomatis mengisi API Key dari .env Anda
     },
   })
 );
 
-// Error handler
+// Global Error Handler
 app.onError(errorHandler);
 
 export default app;
