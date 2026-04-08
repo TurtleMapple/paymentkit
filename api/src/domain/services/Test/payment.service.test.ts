@@ -26,7 +26,7 @@ describe('PaymentService', () => {
   });
 
   describe('createPayment()', () => {
-    it('should create a payment successfully (Happy Path)', async () => {
+    it('harus berhasil membuat pembayaran (Happy Path)', async () => {
       const orderId = 'ORD-123';
       const mockPayment = Payment.create(orderId, 10000);
 
@@ -40,7 +40,7 @@ describe('PaymentService', () => {
       expect(mockPublisher.publishPaymentCreated).toHaveBeenCalledWith(orderId);
     });
 
-    it('should throw error if Order ID already exists (Sad Path)', async () => {
+    it('harus melempar error jika Order ID sudah ada (Sad Path)', async () => {
       const orderId = 'ORD-123';
       vi.mocked(mockRepo.findByOrderId).mockResolvedValue(Payment.create(orderId, 10000));
 
@@ -52,7 +52,7 @@ describe('PaymentService', () => {
   });
 
   describe('updatePaymentStatus()', () => {
-    it('should update status successfully (Happy Path)', async () => {
+    it('harus berhasil memperbarui status (Happy Path)', async () => {
       const orderId = 'ORD-123';
       const existingPayment = Payment.create(orderId, 10000);
 
@@ -66,7 +66,7 @@ describe('PaymentService', () => {
       expect(mockPublisher.publishPaymentUpdated).toHaveBeenCalledWith(orderId, PaymentStatus.PAID);
     });
 
-    it('should throw error if transition is invalid (Sad Path)', async () => {
+    it('harus melempar error jika transisi status tidak valid (Sad Path)', async () => {
       const orderId = 'ORD-123';
       const existingPayment = Payment.create(orderId, 10000);
       existingPayment.complete(); // Status: PAID
@@ -79,14 +79,14 @@ describe('PaymentService', () => {
       expect(mockRepo.save).toHaveBeenCalledTimes(0);
     });
 
-    it('should throw error if payment is not found (Sad Path)', async () => {
+    it('harus melempar error jika data pembayaran tidak ditemukan (Sad Path)', async () => {
       vi.mocked(mockRepo.findByOrderId).mockResolvedValue(null);
 
       await expect(paymentService.updatePaymentStatus('NON-EXISTENT', PaymentStatus.PAID))
         .rejects.toThrow('Payment not found');
     });
 
-    it('should return immediately if payment is already in final state (Idempotency)', async () => {
+    it('harus langsung kembali (idempoten) jika status pembayaran sudah final (Idempotensi)', async () => {
       const orderId = 'ORD-123';
       const existingPayment = Payment.create(orderId, 10000);
       existingPayment.complete(); // Status: PAID

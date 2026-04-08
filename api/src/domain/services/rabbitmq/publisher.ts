@@ -1,58 +1,100 @@
-import { env } from '../../../config/env'
-import { getRabbitMQChannel } from './channel'
-import { EXCHANGES, ROUTING_KEYS } from './topology'
+import { v4 as uuidv4 } from 'uuid';
+import { env } from '../../../config/env';
+import { RabbitMQChannelManager } from './channel';
+import { EXCHANGES, ROUTING_KEYS } from './topology';
+import { logger } from '../../../utils/logger';
 
 /**
- * Publish message ke RabbitMQ Exchange
+ * RABBITMQ PUBLISHER STANDARDS
  * 
- * @param routingKey - Routing key untuk routing message
- * @param message - Message payload (akan di-serialize ke JSON)
- * 
- * @solid-principles
- * - SRP: Function ini hanya handle publishing
- * - OCP: Bisa extend dengan routing key baru tanpa ubah function
- * - DIP: Depend on channel abstraction
- * 
- * @architecture
- * Producer tidak tahu queue tujuan, hanya tahu exchange dan routing key.
- * Exchange yang akan routing message ke queue berdasarkan binding.
+ * @standarisasi
+ * - Base Abstract Class: Kerangka dasar untuk seluruh publisher di sistem.
+ * - Auto-Serialization: Otomatis konversi JSON ke Buffer.
+ * - Jaminan Pengiriman: Menggunakan persistent: true dan ConfirmChannel (waitForConfirms).
+ * - Rich Metadata: Menambahkan messageId dan timestamp untuk pelacakan (Tracing).
  */
-export async function publishToExchange(routingKey: string, message: any): Promise<void> {
-    if (!env.RABBITMQ_ENABLED) return
-    // amazonq-ignore-next-line
-    const channel = await getRabbitMQChannel()
-    
-    channel.publish(
-        EXCHANGES.PAYMENT,
-        routingKey,
-        Buffer.from(JSON.stringify(message)),
-        { persistent: true }
-    )
+export abstract class BasePublisher<T> {
+  protected abstract readonly exchange: string;
+  protected abstract readonly routingKey: string;
 
-    console.log(`📤 Published to [${EXCHANGES.PAYMENT}] with key [${routingKey}]:`, message)
+  /**
+   * Mengirim pesan ke RabbitMQ Exchange
+   */
+  public async publish(data: T): Promise<boolean> {
+    if (!env.RABBITMQ_ENABLED) {
+        logger.warn('⚠️ RabbitMQ is disabled. Message skipped.');
+        return false;
+    }
+
+    try {
+      const channel = await RabbitMQChannelManager.getPublisherChannel();
+      
+      const messageId = uuidv4();
+      const payload = Buffer.from(JSON.stringify({
+        ...data as any,
+        metadata: {
+            messageId,
+            publishedAt: new Date().toISOString(),
+        }
+      }));
+
+      logger.debug(`📤 Publishing to [${this.exchange}] with key [${this.routingKey}]...`, { messageId });
+
+      // Publish dengan flag persistent agar pesan tidak hilang jika broker restart
+      const isSent = channel.publish(this.exchange, this.routingKey, payload, {
+        persistent: true,
+        messageId: messageId,
+        timestamp: Date.now(),
+        contentType: 'application/json',
+      });
+
+      if (!isSent) {
+        logger.error('❌ Failed to publish message: Channel buffer full');
+        return false;
+      }
+
+      // Tunggu konfirmasi dari broker (Publisher Confirms)
+      await channel.waitForConfirms();
+      
+      logger.success(`✅ Published to [${this.exchange}] with key [${this.routingKey}]`);
+      return true;
+    } catch (error) {
+      logger.error(`❌ Error publishing to [${this.exchange}]:`, error);
+      throw error;
+    }
+  }
 }
 
 /**
- * Helper: Publish payment creation event
- * 
- * @solid-principles
- * - SRP: Dedicated function untuk payment creation
- * - ISP: Interface segregation - specific function untuk specific use case
+ * IMPLEMENTASI KONKRIT: Payment Publisher
+ */
+export class PaymentCreatedPublisher extends BasePublisher<{ orderId: string }> {
+  protected exchange = EXCHANGES.PAYMENT;
+  protected routingKey = ROUTING_KEYS.PAYMENT_CREATED;
+}
+
+export class PaymentUpdatedPublisher extends BasePublisher<{ orderId: string, status: string }> {
+  protected exchange = EXCHANGES.PAYMENT;
+  protected routingKey = ROUTING_KEYS.PAYMENT_UPDATED;
+}
+
+export class WebhookReceivedPublisher extends BasePublisher<{ orderId: string, gateway: string }> {
+  protected exchange = EXCHANGES.PAYMENT;
+  protected routingKey = ROUTING_KEYS.PAYMENT_WEBHOOK;
+}
+
+/**
+ * LEGACY WRAPPERS
+ * Membungkus class baru agar tidak merusak kode yang memanggil versi functional.
  */
 export async function publishPaymentCreated(orderId: string): Promise<void> {
-    await publishToExchange(ROUTING_KEYS.PAYMENT_CREATED, { orderId })
+  await new PaymentCreatedPublisher().publish({ orderId });
 }
 
-/**
- * Helper: Publish payment update event
- */
 export async function publishPaymentUpdated(orderId: string, status: string): Promise<void> {
-    await publishToExchange(ROUTING_KEYS.PAYMENT_UPDATED, { orderId, status })
+  await new PaymentUpdatedPublisher().publish({ orderId, status });
 }
 
-/**
- * Helper: Publish webhook received event
- */
 export async function publishWebhookReceived(orderId: string, gateway: string): Promise<void> {
-    await publishToExchange(ROUTING_KEYS.PAYMENT_WEBHOOK, { orderId, gateway })
+  await new WebhookReceivedPublisher().publish({ orderId, gateway });
 }

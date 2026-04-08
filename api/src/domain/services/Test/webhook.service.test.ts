@@ -24,7 +24,7 @@ describe('WebhookService', () => {
   });
 
   describe('processWebhook()', () => {
-    it('should process webhook successfully (Happy Path)', async () => {
+    it('harus berhasil memproses webhook (Happy Path)', async () => {
       const payload = { order_id: 'ORD-123', status: 'settlement' };
       const signature = 'valid-sig';
       const webhookResult = { 
@@ -51,7 +51,7 @@ describe('WebhookService', () => {
       );
     });
 
-    it('should throw error if signature is invalid (Sad Path)', async () => {
+    it('harus melempar error jika tanda tangan (signature) tidak valid (Sad Path)', async () => {
       vi.mocked(mockGateway.validateWebhook).mockReturnValue(false);
 
       await expect(webhookService.processWebhook(mockGateway, {}, 'bad-sig'))

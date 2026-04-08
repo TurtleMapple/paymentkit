@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "@hono/zod-openapi";
 import { CustomerInfoSchema } from "./customer.schema";
 import { SuccessResponseSchema, PaginatedResponseSchema } from "./shared.schema";
 
@@ -9,7 +9,10 @@ import { SuccessResponseSchema, PaginatedResponseSchema } from "./shared.schema"
  * Publishes to RabbitMQ for async processing
  */
 export const CreatePaymentSchema = z.object({
-  amount: z.number().int().positive().describe('Jumlah pembayaran dalam rupiah'),
+  amount: z.number().int().positive().openapi({ 
+    example: 50000,
+    description: 'Jumlah pembayaran dalam rupiah' 
+  }),
   customer: CustomerInfoSchema.describe('Informasi customer'),
 });
 

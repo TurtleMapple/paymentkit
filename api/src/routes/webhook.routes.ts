@@ -8,7 +8,20 @@ import {
 import { ErrorResponseSchema } from '../schemas/shared.schema';
 import { WebhookHandler } from '../handler/webhook.handler';
 
-const webhook = new OpenAPIHono<{ Variables: { webhookService: any } }>();
+const webhook = new OpenAPIHono<{ Variables: { webhookService: any } }>({
+  defaultHook: (result, c) => {
+    if (!result.success) {
+      return c.json({
+        success: false,
+        message: 'Validation failed',
+        errors: result.error.issues.map((e: any) => ({
+          field: e.path.join('.'),
+          message: e.message
+        }))
+      }, 400);
+    }
+  }
+});
 
 /**
  * POST /webhooks/{gateway} route definition
@@ -16,6 +29,17 @@ const webhook = new OpenAPIHono<{ Variables: { webhookService: any } }>();
 const webhookRoute = createRoute({
   method: 'post',
   path: '/{gateway}',
+  tags: ['Webhooks'],
+  summary: 'Menerima Notifikasi/Webhook dari Payment Gateway',
+  description: `Endpoint ini digunakan oleh Payment Gateway (Midtrans, dll) untuk mengirimkan notifikasi status pembayaran secara asinkron. 
+  
+  Sistem akan melakukan:
+  1. Validasi signature (keamanan) berdasarkan gateway yang dipilih.
+  2. Pemrosesan payload untuk mendapatkan Order ID dan Status terbaru.
+  3. Update status pembayaran di database.
+  4. Menjalankan business logic terkait (seperti mengirim email notifikasi ke user).
+  
+  Endpoint ini harus bisa diakses secara publik (Publicly Accessible) agar server Midtrans bisa mengirim data.`,
   request: {
     params: WebhookGatewayParamSchema,
     body: {

@@ -19,12 +19,13 @@ import {
  * - Memastikan seluruh error aplikasi menggunakan format persis seperti di `shared.schema.ts`.
  */
 export const errorHandler = (err: Error, c: Context) => {
-  // Selalu log error murni untuk kebutuhan debug (bisa diganti dengan logger library di masa depan)
-  console.error('[Global Error Catch]:', err.name, err.message);
+  // Selalu log error murni untuk kebutuhan debug
+  console.error('[Global Error Catch]:', err);
 
   // 1. Zod Validation Error (400 Bad Request)
-  if (err instanceof ZodError) {
-    const formattedErrors = err.issues.map(e => ({
+  if (err instanceof ZodError || err.name === 'ZodError') {
+    const zodErr = err as ZodError;
+    const formattedErrors = zodErr.issues.map(e => ({
       field: e.path.join('.'),
       message: e.message
     }));
