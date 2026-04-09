@@ -1,0 +1,41 @@
+# ─────────────────────────────────────────────
+# .dockerignore — Mencegah file tidak perlu masuk ke Docker image
+# Bekerja seperti .gitignore, tapi untuk perintah COPY di Dockerfile.
+# ─────────────────────────────────────────────
+
+# Dependensi lokal (akan di-install ulang di dalam container)
+node_modules/
+
+# Hasil build lokal (akan di-generate ulang oleh tsc di dalam container)
+dist/
+
+# File environment (JANGAN masuk image — akan diinject via env_file di docker-compose)
+.env
+.env.*
+!.env.example
+
+# Hasil test coverage
+coverage/
+
+# File test tidak diperlukan di production
+src/**/*.test.ts
+src/**/test/
+src/integration/
+
+# Dokumentasi dan metadata
+*.md
+LICENSE
+
+# Git history tidak diperlukan di dalam image
+.git/
+.gitignore
+
+# File konfigurasi development
+vitest.config.ts
+debug-db.ts
+unit_test_plan.md
+
+# Docker config sendiri (tidak perlu di-copy ke dalam image)
+Dockerfile
+docker-compose.yml
+.dockerignore

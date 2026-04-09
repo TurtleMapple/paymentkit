@@ -1,0 +1,138 @@
+# ─────────────────────────────────────────────────────
+# DOCKER COMPOSE — PaymentKit API
+#
+# Menjalankan 4 service sekaligus:
+#   1. api       → HTTP Server (Hono)
+#   2. worker    → RabbitMQ Consumer
+#   3. db        → MySQL 8.0 Database
+#   4. rabbitmq  → Message Broker
+#
+# Penggunaan:
+#   docker compose up -d              → Jalankan semua service
+#   docker compose ps                 → Lihat status service
+#   docker compose logs -f api        → Pantau log API
+#   docker compose logs -f worker     → Pantau log Worker
+#   docker compose down               → Matikan semua service
+# ─────────────────────────────────────────────────────
+
+services:
+  # ────────────────────────────────
+  # SERVICE 1: API (HTTP Server)
+  # ────────────────────────────────
+  api:
+    image: ghcr.io/turtlemapple/paymentkit:latest
+    container_name: paymentkit-api
+    command: node dist/server.js
+    ports:
+      - "${PORT:-3000}:3000"
+    env_file:
+      - .env
+    environment:
+      # Override DB_HOST dan RABBITMQ_URL agar mengarah ke container internal,
+      # bukan localhost (karena di dalam Docker, setiap container punya network sendiri)
+      - DB_HOST=db
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - paymentkit-net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ────────────────────────────────
+  # SERVICE 2: WORKER (RabbitMQ Consumer)
+  # Image yang SAMA dengan API, hanya beda command.
+  # Worker tidak perlu expose port karena hanya
+  # mengkonsumsi pesan dari RabbitMQ.
+  # ────────────────────────────────
+  worker:
+    image: ghcr.io/turtlemapple/paymentkit:latest
+    container_name: paymentkit-worker
+    command: node dist/worker/index.js
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=db
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - paymentkit-net
+
+  # ────────────────────────────────
+  # SERVICE 3: DATABASE (MySQL 8.0)
+  # Port TIDAK di-expose ke publik.
+  # Hanya bisa diakses oleh service lain
+  # melalui internal network (paymentkit-net).
+  # Data disimpan di Docker Volume agar persisten.
+  # ────────────────────────────────
+  db:
+    image: mysql:8.0
+    container_name: paymentkit-db
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME:-paymentkit}
+    volumes:
+      - db_data:/var/lib/mysql
+    restart: unless-stopped
+    networks:
+      - paymentkit-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ────────────────────────────────
+  # SERVICE 4: RABBITMQ (Message Broker)
+  # Management UI (port 15672) TIDAK di-expose
+  # ke publik sesuai keputusan.
+  # Hanya port AMQP (5672) yang tersedia secara
+  # internal untuk service lain.
+  # ────────────────────────────────
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: paymentkit-rabbitmq
+    restart: unless-stopped
+    networks:
+      - paymentkit-net
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+# ─────────────────────────────────────────────────────
+# VOLUMES
+# Docker-managed volume untuk menyimpan data MySQL.
+# Data tetap aman meskipun container di-restart atau di-recreate.
+# Data HANYA hilang jika volume dihapus secara eksplisit
+# (docker volume rm paymentkit_db_data).
+# ─────────────────────────────────────────────────────
+volumes:
+  db_data:
+    driver: local
+
+# ─────────────────────────────────────────────────────
+# NETWORKS
+# Semua service terhubung via jaringan internal ini.
+# Service bisa saling berkomunikasi menggunakan nama
+# container sebagai hostname (contoh: db, rabbitmq).
+# ─────────────────────────────────────────────────────
+networks:
+  paymentkit-net:
+    driver: bridge

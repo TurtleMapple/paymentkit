@@ -1,0 +1,129 @@
+name: Deploy PaymentKit API
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'api/**'
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/paymentkit
+
+jobs:
+  # ===================================================
+  # JOB 1: CI (Continuous Integration)
+  # Memastikan kode bisa di-build dan test lulus
+  # SEBELUM melanjutkan ke deployment.
+  # ===================================================
+  ci:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./api
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+          cache-dependency-path: api/pnpm-lock.yaml
+
+      # --frozen-lockfile memastikan lockfile tidak berubah (build deterministik)
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Memastikan kode bisa dikompilasi tanpa error
+      - name: Build TypeScript
+        run: pnpm build
+
+      # Jika test gagal, job deploy TIDAK akan dilanjutkan
+      - name: Run tests
+        run: pnpm test:run
+        env:
+          NODE_ENV: test
+
+  # ===================================================
+  # JOB 2: CD (Continuous Deployment)
+  # Build Docker image, push ke registry,
+  # dan deploy ke VPS via SSH.
+  # HANYA jalan jika Job CI berhasil.
+  # ===================================================
+  deploy:
+    name: Deploy to VPS
+    needs: ci
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # GITHUB_TOKEN disediakan otomatis oleh GitHub Actions
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Tag otomatis: :latest dan :<commit-sha> (untuk rollback)
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=sha,format=short
+
+      # Build di CI, BUKAN di VPS - menjaga VPS bersih dari build tools
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./api
+          file: ./api/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      # Semua kredensial diambil dari GitHub Secrets
+      - name: Deploy to VPS via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd /app/api
+            echo "Pulling latest image..."
+            docker compose pull
+            echo "Restarting containers..."
+            docker compose up -d --remove-orphans
+            echo "Waiting for API to be ready..."
+            sleep 10
+            echo "Running database migrations..."
+            docker compose exec -T api node -e "require('./dist/config/db.js').initDatabase().then(async (orm) => { const migrator = orm.getMigrator(); const pending = await migrator.getPendingMigrations(); if (pending.length > 0) { console.log('Running ' + pending.length + ' migrations...'); await migrator.up(); console.log('Done.'); } else { console.log('No pending migrations.'); } await orm.close(); }).catch(err => { console.error(err); process.exit(1); });"
+            echo "Cleaning up unused images..."
+            docker system prune -f
+            echo "Deployment complete!"
+
+      # Verifikasi API berjalan setelah deploy (retry 5x)
+      - name: Health check
+        run: |
+          echo "Checking API health..."
+          curl --retry 5 --retry-delay 5 --retry-connrefused --fail http://${{ secrets.SERVER_HOST }}:3000/health
+          echo "Health check passed!"
