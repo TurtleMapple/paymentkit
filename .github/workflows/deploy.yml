@@ -56,6 +56,9 @@ jobs:
         run: pnpm test:run
         env:
           NODE_ENV: test
+          API_KEY: ci-test-key-12345
+          MIDTRANS_SERVER_KEY: ci-test-server-key
+          MIDTRANS_CLIENT_KEY: ci-test-client-key
 
   # ===================================================
   # JOB 2: CD (Continuous Deployment)
@@ -108,7 +111,7 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            cd /app/api
+            cd /home/dhika/paymentkit/api
             echo "Pulling latest image..."
             docker compose pull
             echo "Restarting containers..."
