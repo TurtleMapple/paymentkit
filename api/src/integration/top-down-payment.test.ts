@@ -30,7 +30,6 @@ describe('Top-Down Integration Test: Payment API', () => {
       throw err;
     }
   });
-
   // Blok ini jalan sekali di akhir setelah semua tes selesai
   afterAll(async () => {
     // Tutup koneksi database agar proses tes bisa berhenti dengan bersih
