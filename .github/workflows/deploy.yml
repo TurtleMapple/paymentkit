@@ -51,9 +51,9 @@ jobs:
       - name: Build TypeScript
         run: pnpm build
 
-      # Jika test gagal, job deploy TIDAK akan dilanjutkan
-      - name: Run tests
-        run: pnpm test:run
+      # Hanya jalankan unit test di CI (integration test butuh MySQL yang tidak tersedia)
+      - name: Run unit tests
+        run: pnpm vitest run --exclude 'src/integration/**'
         env:
           NODE_ENV: test
           API_KEY: ci-test-key-12345
