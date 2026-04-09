@@ -27,6 +27,6 @@ describe('PaymentGatewayFactory', () => {
   it('harus melempar error jika gateway tidak didukung', () => {
     expect(() => {
       PaymentGatewayFactory.create('not-supported-gateway');
-    }).toThrow(/is not supported/);
+    }).toThrow(/belum didukung/);
   });
 });

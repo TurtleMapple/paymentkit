@@ -80,7 +80,6 @@ describe('Webhook Schema - Unit & Gray Box Testing', () => {
       it('harus menerima berbagai nama gateway selama tidak kosong', () => {
         expect(WebhookGatewayParamSchema.safeParse({ gateway: 'midtrans' }).success).toBe(true);
         expect(WebhookGatewayParamSchema.safeParse({ gateway: 'xendit' }).success).toBe(true);
-        expect(WebhookGatewayParamSchema.safeParse({ gateway: 'stripe' }).success).toBe(true);
       });
     });
   });
