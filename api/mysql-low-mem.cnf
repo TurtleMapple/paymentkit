@@ -1,0 +1,20 @@
+[mysqld]
+# Disable Performance Schema to save memory (~200MB - 300MB RAM)
+performance_schema = OFF
+
+# Reduce InnoDB Buffer Pool for low memory VM
+innodb_buffer_pool_size = 128M
+innodb_buffer_pool_instances = 1
+
+# Reduce per-thread and per-connection buffers
+sort_buffer_size = 512K
+join_buffer_size = 512K
+read_buffer_size = 256K
+read_rnd_buffer_size = 512K
+thread_stack = 256K
+
+# Reduce maximum connections (suitable for small internal API)
+max_connections = 50
+
+# Other adjustments
+innodb_log_buffer_size = 8M

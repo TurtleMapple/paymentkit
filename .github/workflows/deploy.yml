@@ -113,7 +113,12 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           command_timeout: 30m
           script: |
-            cd /home/dhika/paymentkit/api
+            cd /home/dhika/paymentkit
+            echo "Pulling latest deployment configs..."
+            git config pull.rebase false
+            git fetch origin
+            git reset --hard origin/main
+            cd api
             echo "Pulling latest image..."
             docker compose pull
             echo "Restarting containers..."
