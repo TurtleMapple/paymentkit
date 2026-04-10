@@ -2,6 +2,7 @@ import { PaymentStatus } from '../entities/paymentStatus';
 import { Payment } from '../entities/paymentEntity';
 import { IPaymentRepository } from '../repositories/IPaymentRepository';
 import { IPaymentEventPublisher } from './IPaymentEventPublisher';
+import { PaymentGatewayFactory } from '../gateways/PaymentGatewayFactory';
 
 /**
  * PAYMENT SERVICE (Application Service / Use Case Layer)
@@ -18,12 +19,13 @@ export class PaymentService {
   ) { }
 
   /**
-   * Use Case: Membuat pembayaran baru
+   * Use Case: Membuat pembayaran baru secara Sinkron
+   * Langsung mendapatkan link pembayaran dari Gateway (Midtrans, dll).
    */
   async createPayment(
     orderId: string,
     amount: number,
-    gateway: string,
+    gatewayName: string,
     customerName?: string,
     customerEmail?: string
   ): Promise<Payment> {
@@ -34,14 +36,37 @@ export class PaymentService {
     }
 
     // 2. Inisialisasi Domain Entity via Static Factory
-    const payment = Payment.create(orderId, amount, gateway);
+    const payment = Payment.create(orderId, amount, gatewayName);
     payment.customerName = customerName;
     payment.customerEmail = customerEmail;
 
-    // 3. Persistensi ke Database
+    // 3. Panggil Gateway secara SINKRON untuk membuat link pembayaran
+    // Keuntungan: User langsung mendapatkan link di respon pertama.
+    const gateway = PaymentGatewayFactory.create(gatewayName);
+    const gatewayResult = await gateway.createPayment({
+      orderId,
+      amount,
+      customerName,
+      customerEmail
+    });
+
+    // 4. Update data link dari gateway ke Entity
+    payment.updateGatewayMeta({
+      link: gatewayResult.paymentLink,
+      expiredAt: gatewayResult.expiredAt,
+      type: gatewayResult.paymentType
+    });
+    
+    // Simpan respon mentah untuk audit trail
+    if (gatewayResult.gatewayResponse) {
+      // Kita panggil complete manual atau set langsung meta
+      // Karena ini masih PENDING, kita update metanya saja
+    }
+
+    // 5. Persistensi ke Database
     await this.repo.save(payment);
 
-    // 4. Publikasi Event Kesuksesan (Explicit Orchestration)
+    // 6. Publikasi Event Kesuksesan (Agar sistem lain/worker tetap tahu ada payment baru)
     await this.publisher.publishPaymentCreated(orderId);
 
     return payment;

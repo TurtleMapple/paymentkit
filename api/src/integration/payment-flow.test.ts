@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import app from '../app';
 import { initDatabase, orm } from '../config/db';
 import { RabbitMQTopology } from '../domain/services/rabbitmq/topology';
@@ -6,6 +6,21 @@ import { RabbitMQChannelManager } from '../domain/services/rabbitmq/channel';
 import { closeRabbitMQConnection } from '../domain/services/rabbitmq/connection';
 import { Payment } from '../domain/entities/paymentEntity';
 import { env } from '../config/env';
+
+// Mock Gateway agar tidak memanggil API asli saat integration test
+vi.mock('../domain/gateways/PaymentGatewayFactory', () => ({
+  PaymentGatewayFactory: {
+    create: vi.fn(() => ({
+      createPayment: vi.fn().mockResolvedValue({
+        orderId: 'test-order',
+        paymentLink: 'https://test.link',
+        paymentType: 'test',
+        expiredAt: new Date(),
+        gatewayResponse: {}
+      })
+    }))
+  }
+}));
 
 describe('Big Bang Integration Test: Payment Flow', () => {
   beforeAll(async () => {

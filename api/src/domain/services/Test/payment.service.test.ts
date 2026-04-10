@@ -4,13 +4,28 @@ import { PaymentStatus } from '../../entities/paymentStatus';
 import { IPaymentRepository } from '../../repositories/IPaymentRepository';
 import { IPaymentEventPublisher } from '../IPaymentEventPublisher';
 import { Payment } from '../../entities/paymentEntity';
+import { PaymentGatewayFactory } from '../../gateways/PaymentGatewayFactory';
+
+// Mocking the Factory
+vi.mock('../../gateways/PaymentGatewayFactory', () => ({
+  PaymentGatewayFactory: {
+    create: vi.fn()
+  }
+}));
 
 describe('PaymentService', () => {
   let paymentService: PaymentService;
   let mockRepo: IPaymentRepository;
   let mockPublisher: IPaymentEventPublisher;
 
+  // Mock Gateway Instance
+  const mockGateway = {
+    createPayment: vi.fn(),
+  };
+
   beforeEach(() => {
+    vi.clearAllMocks();
+    
     mockRepo = {
       findByOrderId: vi.fn(),
       save: vi.fn(),
@@ -23,19 +38,32 @@ describe('PaymentService', () => {
     } as unknown as IPaymentEventPublisher;
 
     paymentService = new PaymentService(mockRepo, mockPublisher);
+
+    // Setup Factory Mock Return
+    vi.mocked(PaymentGatewayFactory.create).mockReturnValue(mockGateway as any);
   });
 
   describe('createPayment()', () => {
-    it('harus berhasil membuat pembayaran (Happy Path)', async () => {
+    it('harus berhasil membuat pembayaran dan mendapatkan link secara sinkron (Happy Path)', async () => {
       const orderId = 'ORD-123';
-      const mockPayment = Payment.create(orderId, 10000);
+      const mockPaymentLink = 'https://app.midtrans.com/snap/v2/vtweb/12345';
+      
+      // Stubbing Gateway Result
+      mockGateway.createPayment.mockResolvedValue({
+        orderId,
+        paymentLink: mockPaymentLink,
+        paymentType: 'payment_link'
+      });
 
       vi.mocked(mockRepo.findByOrderId).mockResolvedValue(null);
       vi.mocked(mockRepo.save).mockResolvedValue(undefined);
 
       const result = await paymentService.createPayment(orderId, 10000, 'midtrans');
 
+      // Assertions
       expect(result.orderId).toBe(orderId);
+      expect(result.paymentLink).toBe(mockPaymentLink); // Memastikan link tersimpan
+      expect(mockGateway.createPayment).toHaveBeenCalled();
       expect(mockRepo.save).toHaveBeenCalled();
       expect(mockPublisher.publishPaymentCreated).toHaveBeenCalledWith(orderId);
     });

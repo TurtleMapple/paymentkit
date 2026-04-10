@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { initDatabase, orm } from '../config/db';
 import { PaymentRepository } from '../domain/repositories/payment.repository';
 import { PaymentService } from '../domain/services/payment.service';
@@ -7,6 +7,21 @@ import { closeRabbitMQConnection } from '../domain/services/rabbitmq/connection'
 import { PaymentStatus } from '../domain/entities/paymentStatus';
 import { Payment } from '../domain/entities/paymentEntity';
 import { env } from '../config/env';
+
+// Mock Gateway
+vi.mock('../domain/gateways/PaymentGatewayFactory', () => ({
+  PaymentGatewayFactory: {
+    create: vi.fn(() => ({
+      createPayment: vi.fn().mockResolvedValue({
+        orderId: 'test-order',
+        paymentLink: 'https://test.link',
+        paymentType: 'test',
+        expiredAt: new Date(),
+        gatewayResponse: {}
+      })
+    }))
+  }
+}));
 
 /**
  * STRATEGI: Bottom-Up Integration Test

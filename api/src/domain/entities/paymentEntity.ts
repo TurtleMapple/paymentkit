@@ -7,7 +7,7 @@ export class Payment {
   @PrimaryKey({ type: 'uuid' })
   private id: string
 
-  @Property({ type: 'string', length: 64, unique: true, fieldName: 'order_id' })
+  @Property({ type: 'string', length: 128, unique: true, fieldName: 'order_id' })
   readonly orderId: string
 
   @Property({ type: 'int' })
