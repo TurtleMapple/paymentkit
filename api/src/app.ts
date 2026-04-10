@@ -102,7 +102,12 @@ app.doc('/doc', {
     title: 'Payment API',
     description: 'Payment Gateway API with RabbitMQ integration',
   },
-  servers: [{ url: `http://localhost:${env.PORT}`, description: 'Development server' }],
+  // Scalar UI / Swagger dapat memilih server secara dinamis melalui dropdown
+  servers: [
+    { url: '/', description: 'Current Environment (Auto-detect)' },
+    { url: `http://localhost:${env.PORT}`, description: 'Local Development' },
+    { url: 'http://www.mansur.my.id', description: 'Production Server' }
+  ],
   // Terapkan security secara global agar muncul di UI untuk semua rute
   security: [{ ApiKeyAuth: [] }],
 });
