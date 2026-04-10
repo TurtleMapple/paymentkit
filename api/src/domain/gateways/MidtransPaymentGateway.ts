@@ -117,7 +117,7 @@ export class MidtransPaymentGateway implements PaymentGateway {
       logger.debug(`[Midtrans] Check status response: ${request.orderId}`, maskSensitiveData(data));
 
       return {
-        orderId: data.order_id,
+        orderId: this.extractOriginalOrderId(data.order_id),
         status: this.mapStatus(data.transaction_status),
         paymentType: data.payment_type,
         paidAt: data.settlement_time ? new Date(data.settlement_time) : undefined,
@@ -144,7 +144,7 @@ export class MidtransPaymentGateway implements PaymentGateway {
   async processWebhook(payload: any): Promise<CheckStatusResponse> {
     logger.debug(`[Midtrans] Processing webhook for: ${payload.order_id}`, maskSensitiveData(payload));
     return {
-      orderId: payload.order_id,
+      orderId: this.extractOriginalOrderId(payload.order_id),
       status: this.mapStatus(payload.transaction_status),
       paymentType: payload.payment_type,
       paidAt: payload.settlement_time ? new Date(payload.settlement_time) : undefined,
@@ -226,6 +226,25 @@ export class MidtransPaymentGateway implements PaymentGateway {
       'refund': PaymentStatus.REFUNDED
     };
     return map[status?.toLowerCase()] || PaymentStatus.PENDING;
+  }
+
+  /**
+   * Helper: Midtrans Payment Links appends a timestamp (e.g. -1775792567579) to the order_id 
+   * to ensure uniqueness internally on their side.
+   * This method robustly extracts our original order_id using regex.
+   */
+  private extractOriginalOrderId(rawOrderId: string): string {
+    if (!rawOrderId) return rawOrderId;
+    
+    // Pattern: Mencari tanda hubung '-' diikuti oleh 10-15 digit angka di akhir string.
+    // Ini adalah pola standar timestamp yang ditambahkan Midtrans Paylink.
+    const timestampPattern = /-(\d{10,15})$/;
+    
+    if (timestampPattern.test(rawOrderId)) {
+      return rawOrderId.replace(timestampPattern, '');
+    }
+    
+    return rawOrderId;
   }
 
   // --- CENTRALIZED ERROR HANDLING --- //
