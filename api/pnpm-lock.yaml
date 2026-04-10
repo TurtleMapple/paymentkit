@@ -20,6 +20,9 @@ importers:
       '@hono/zod-openapi':
         specifier: ^1.2.0
         version: 1.2.1(hono@4.11.9)(zod@4.3.6)
+      '@mikro-orm/cli':
+        specifier: ^6.6.4
+        version: 6.6.6(mysql2@3.16.3)(pg@8.16.3)
       '@mikro-orm/core':
         specifier: ^6.6.4
         version: 6.6.6
@@ -72,9 +75,6 @@ importers:
         specifier: ^4.3.6
         version: 4.3.6
     devDependencies:
-      '@mikro-orm/cli':
-        specifier: ^6.6.4
-        version: 6.6.6(mysql2@3.16.3)(pg@8.16.3)
       '@types/aws-lambda':
         specifier: 8.10.160
         version: 8.10.160
