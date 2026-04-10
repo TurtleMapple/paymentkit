@@ -76,7 +76,9 @@ app.openapi(
 const v1 = new OpenAPIHono<{ Variables: Variables }>();
 
 v1.use('/payments/*', apiKeyAuth);
-v1.use('/webhooks/*', apiKeyAuth);
+// Webhook endpoint MURNI publik, tidak butuh apiKeyAuth karena Midtrans
+// tidak bisa mengirim custom header x-api-key. Keamanan webhook
+// dijaga via validasi Signature Key di dalam service-nya.
 
 v1.route('/payments', paymentRoutes);
 v1.route('/webhooks', webhookRoutes);
