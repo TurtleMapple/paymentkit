@@ -28,7 +28,7 @@ describe('Webhook Handler - Unit & Gray Box Testing', () => {
         mockContext.req.header.mockReturnValue(null);
 
         await expect(handler.handleWebhook(mockContext, { gateway: 'midtrans' }, {}))
-          .rejects.toThrow('Signature header tidak ditemukan');
+          .rejects.toThrow('Signature tidak ditemukan di header maupun di body payload');
       });
     });
 
