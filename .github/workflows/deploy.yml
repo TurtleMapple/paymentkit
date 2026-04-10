@@ -3,9 +3,9 @@ name: Deploy PaymentKit API
 on:
   push:
     branches: [sapi]
-    paths:
-      - 'api/**'
-      - '.github/workflows/**'
+    # paths:
+    #   - 'api/**'
+    #   - '.github/workflows/**'
 
 permissions:
   contents: read
