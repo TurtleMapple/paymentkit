@@ -44,7 +44,8 @@ const startServer = async () => {
 
     serve({
         fetch: app.fetch,
-        port: env.PORT
+        port: env.PORT,
+        hostname: '0.0.0.0'
     })
 
     logger.success(`🚀 Server running on port ${env.PORT}`)

@@ -31,21 +31,35 @@ const webhookRoute = createRoute({
   path: '/{gateway}',
   tags: ['Webhooks'],
   summary: 'Menerima Notifikasi/Webhook dari Payment Gateway',
-  description: `Endpoint ini digunakan oleh Payment Gateway (Midtrans, dll) untuk mengirimkan notifikasi status pembayaran secara asinkron. 
-  
-  Sistem akan melakukan:
-  1. Validasi signature (keamanan) berdasarkan gateway yang dipilih.
-  2. Pemrosesan payload untuk mendapatkan Order ID dan Status terbaru.
-  3. Update status pembayaran di database.
-  4. Menjalankan business logic terkait (seperti mengirim email notifikasi ke user).
-  
-  Endpoint ini harus bisa diakses secara publik (Publicly Accessible) agar server Midtrans bisa mengirim data.`,
+  description: `### 🚀 Endpoint untuk Vendor (Bukan untuk Frontend)
+  Endpoint ini **WAJIB PUBLIK** dan digunakan oleh Payment Gateway (seperti Midtrans) untuk mengabarkan status pembayaran secara otomatis.
+
+  ### 🛠️ Cara Testing (untuk Developer):
+  1. Pilih **gateway** (misal: \`midtrans\`).
+  2. Gunakan contoh payload di bawah.
+  3. **PENTING**: Jika kamu mencoba endpoint ini manual, kirimkan header \`x-signature\` atau pastikan \`signature_key\` di body sesuai dengan perhitungan Midtrans, jika tidak, sistem akan menolak (401).
+
+  ### 📝 Payload yang diharapkan:
+  Sistem ini fleksibel (passthrough), namun Midtrans biasanya mengirimkan data seperti contoh di bawah.`,
   request: {
     params: WebhookGatewayParamSchema,
     body: {
       content: {
         'application/json': {
-          schema: WebhookRequestSchema,
+          schema: WebhookRequestSchema.openapi({
+            example: {
+              transaction_time: "2024-03-24 10:00:00",
+              transaction_status: "settlement",
+              status_message: "midtrans payment notification",
+              status_code: "200",
+              signature_key: "masukkan_signature_key_disini",
+              payment_type: "bank_transfer",
+              order_id: "ORD-12345",
+              merchant_id: "G123456789",
+              gross_amount: "50000.00",
+              currency: "IDR"
+            }
+          }),
         },
       },
     },
