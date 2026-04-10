@@ -1,4 +1,4 @@
 import { defineConfig } from '@mikro-orm/mysql';
-import { getDbConfig } from './src/config/db';
+import { getDbConfig } from './config/db';
 
 export default defineConfig(getDbConfig() as any);
