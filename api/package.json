@@ -40,8 +40,8 @@
     "dotenv": "^17.2.3",
     "hono": "^4.11.4",
     "midtrans-client": "^1.4.3",
-    "mikro-orm": "^6.6.4",
     "@mikro-orm/cli": "^6.6.4",
+    "mikro-orm": "^6.6.4",
     "mysql2": "^3.16.1",
     "reflect-metadata": "^0.2.2",
     "sst": "3.17.38",
@@ -49,6 +49,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@mikro-orm/cli": "^6.6.4",
     "@types/aws-lambda": "8.10.160",
     "@types/midtrans-client": "^1.4.0",
     "@types/node": "^25.0.9",
