@@ -45,10 +45,17 @@ export class WebhookHandler {
    * Endpoint: POST /webhooks/:gateway
    */
   handleWebhook = async (c: Context, gatewayParam: WebhookGatewayParam, body: any) => {
-    // 1. Dapatkan signature (Fail Fast jika tidak ada)
-    const signature = this.extractSignature(c);
+    // 1. Dapatkan signature dari Header
+    let signature = this.extractSignature(c);
+    
+    // 2. Jika tidak ada di header, coba cari di dalam Body (Khusus Midtrans signature_key)
+    if (!signature && body && body.signature_key) {
+      signature = body.signature_key;
+    }
+
+    // 3. Fail Fast jika tetap tidak ditemukan
     if (!signature) {
-      throw new Error('Signature header tidak ditemukan'); // Otomatis ke-401 di middleware
+      throw new Error('Signature tidak ditemukan di header maupun di body payload');
     }
 
     // 2. Tentukan gateway dari URL parameter
