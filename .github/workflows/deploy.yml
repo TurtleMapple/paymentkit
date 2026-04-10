@@ -126,7 +126,7 @@ jobs:
             echo "Waiting for API to be ready..."
             sleep 10
             echo "Running database migrations..."
-            docker compose exec -T api npm run migration:up
+            docker compose exec -T api npx mikro-orm migration:up --config ./dist/mikro-orm.config.js
             echo "Cleaning up unused images..."
             docker system prune -f
             echo "Deployment complete!"
