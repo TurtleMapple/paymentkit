@@ -126,7 +126,7 @@ jobs:
             echo "Waiting for API to be ready..."
             sleep 10
             echo "Running database migrations..."
-            docker compose exec -T api node -e "require('./dist/config/db.js').initDatabase().then(async (orm) => { const migrator = orm.getMigrator(); const pending = await migrator.getPendingMigrations(); if (pending.length > 0) { console.log('Running ' + pending.length + ' migrations...'); await migrator.up(); console.log('Done.'); } else { console.log('No pending migrations.'); } await orm.close(); }).catch(err => { console.error(err); process.exit(1); });"
+            docker compose exec -T api npm run migration:up
             echo "Cleaning up unused images..."
             docker system prune -f
             echo "Deployment complete!"

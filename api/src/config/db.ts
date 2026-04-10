@@ -16,8 +16,8 @@ export const getDbConfig = (): Options => {
     entities: [Payment], // List semua Entity (Tabel) yang kita miliki
     extensions: [Migrator], // Aktifkan fitur Migrasi (Auto-update database)
     migrations: {
-      path: './src/database/migrations',
-      pathTs: './src/database/migrations',
+      path: './dist/database/migrations', // File .js hasil build (untuk production)
+      pathTs: './src/database/migrations', // File .ts asli (untuk development)
       disableForeignKeys: false,
       transactional: true, // Pastikan migrasi aman jika gagal tengah jalan
     },
