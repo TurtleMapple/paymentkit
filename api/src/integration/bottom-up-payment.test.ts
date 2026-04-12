@@ -8,129 +8,164 @@ import { PaymentStatus } from '../domain/entities/paymentStatus';
 import { Payment } from '../domain/entities/paymentEntity';
 import { env } from '../config/env';
 
-// Mock Gateway
+/**
+ * STRATEGI: Bottom-Up Integration Test
+ * 
+ * Filosofi: Menyusun sistem layaknya merakit fondasi gedung dari yang paling dasar.
+ * Kita mulai dari pondasi terdalam (Entity & Database MySQL), memastikan tidak ada keropos data, 
+ * lalu secara bertahap naik ke tingkat di atasnya (Repository/ORM layer), 
+ * dan dipuncaki oleh pemeriksaan Logika Bisnis Terpusat (Application Service).
+ * 
+ * Titik fokusnya adalah membuktikan "ketahanan struktur sistem internal" 
+ * dari manipulasi data atau cacat bisnis, TANPA menyentuh API (HTTP Route).
+ */
+
+// --- MOCK EXTERNAL SYSTEM (Gateway Lokal & Infrastruktur Asinkron) ---
 vi.mock('../domain/gateways/PaymentGatewayFactory', () => ({
   PaymentGatewayFactory: {
     create: vi.fn(() => ({
       createPayment: vi.fn().mockResolvedValue({
-        orderId: 'test-order',
-        paymentLink: 'https://test.link',
-        paymentType: 'test',
-        expiredAt: new Date(),
+        orderId: 'bottom-up-order',
+        paymentLink: 'https://mock.bottom-up.link',
+        paymentType: 'bank_transfer',
+        expiredAt: new Date(Date.now() + 864000),
         gatewayResponse: {}
       })
     }))
   }
 }));
 
-/**
- * STRATEGI: Bottom-Up Integration Test
- * 
- * Cara baca: Tes ini mulai dari "bawah" (Database & Repository) lalu naik ke "tengah" (Service).
- * Kita tidak menggunakan API/Route di sini. Kita ingin memastikan pondasi
- * datanya kuat dulu sebelum dipakai oleh Handler API.
- */
-describe('Bottom-Up Integration Test: Payment Module', () => {
+// Mock Message Broker (RabbitMQ) agar logic Service tidak nge-hang karena tidak ada koneksi message broker nyata
+vi.mock('../domain/services/rabbitmq/RabbitMQEventPublisher', () => {
+  return {
+    RabbitMQPaymentEventPublisher: class {
+      publishPaymentCreated = async () => true;
+      publishPaymentCompleted = async () => true;
+      publishPaymentUpdated = async () => true;
+    }
+  };
+});
+
+describe('Bottom-Up Integration Test: Pondasi Sistem Pembayaran', () => {
   let repository: PaymentRepository;
   let service: PaymentService;
   let publisher: RabbitMQPaymentEventPublisher;
 
+  // --- PERSIAPAN PERAKITAN BOTTOM-UP ---
   beforeAll(async () => {
-    // 1. Inisialisasi Database
-    await initDatabase();
-    
-    // 2. Bersihkan Database (Isolated State)
-    const generator = orm!.getSchemaGenerator();
-    await generator.refreshDatabase();
+    try {
+      await initDatabase();
+      const generator = orm!.getSchemaGenerator();
+      await generator.refreshDatabase();
 
-    // 3. Siapkan komponen Bottom-Level
-    // Kita buat instance manual (sebagai 'Driver') untuk mengetes modul bawah
-    repository = new PaymentRepository(orm!.em.fork());
-    publisher = new RabbitMQPaymentEventPublisher();
-    service = new PaymentService(repository, publisher);
+      // Membangun instansiasi sistem manual (Tindakan meniru IoC Container)
+      repository = new PaymentRepository(orm!.em.fork());
+      publisher = new RabbitMQPaymentEventPublisher();
+      vi.spyOn(publisher, 'publishPaymentCreated');
+      service = new PaymentService(repository, publisher);
+    } catch (error) {
+      console.error('Koneksi DB Test Gagal:', error);
+      throw error;
+    }
   });
 
   afterAll(async () => {
-    if (orm) {
-      await orm.close();
-    }
+    if (orm) await orm.close();
     await closeRabbitMQConnection();
   });
 
-  // ============================================================
-  // TAHAP 1: Uji Lapisan Paling Bawah (Repository)
-  // ============================================================
-  describe('Lapisan 1: PaymentRepository (Database Access)', () => {
-    it('harus bisa menyimpan data pembayaran ke database asli', async () => {
-      const orderId = 'repo-test-' + Date.now();
+  // ========================================================
+  // RANGKAIAN EVENT (TEST FLOW BOTTOM-UP)
+  // ========================================================
+
+  describe('TAHAP 1: Validitas Kelas Entitas Murni (Domain Model Core)', () => {
+    it('harus mengamankan operasi awal instansiasi pembayaran secara internal', () => {
+      // Entity adalah blok material bangunan terkecil. Kita menguji fungsional object-oriented murninya.
+      const orderId = 'entity-test-1';
+      const payment = Payment.create(orderId, 15000, 'midtrans');
       
-      // Gunakan Entity Factory
-      const payment = Payment.create(orderId, 25000, 'midtrans');
-      payment.customerName = 'Repository User';
-      payment.customerEmail = 'repo@example.com';
-
-      // Simpan via repository
-      await repository.save(payment);
-
-      expect(payment.orderId).toBe(orderId);
+      expect(payment.getStatus()).toBe(PaymentStatus.PENDING);
       expect(payment.getId()).toBeDefined();
 
-      // Pastikan benar-benar ada di tabel
-      const found = await repository.findByOrderId(orderId);
-      expect(found).not.toBeNull();
-      expect(found?.customerName).toBe('Repository User');
-    });
-
-    it('harus bisa mengupdate status pembayaran secara atomik', async () => {
-      const orderId = 'repo-update-' + Date.now();
-      const payment = Payment.create(orderId, 10000);
-      await repository.save(payment);
-
-      // Tes pindah status dari PENDING ke PAID via Entity Method
+      // Menguji mutasi metode khusus (Domain Behaviors)
       payment.complete();
-
-      // Terakhir simpan perubahan
-      await repository.save(payment);
-      
-      const updated = await repository.findByOrderId(orderId);
-      expect(updated?.getStatus()).toBe(PaymentStatus.PAID);
+      expect(payment.getStatus()).toBe(PaymentStatus.PAID);
     });
   });
 
-  // ============================================================
-  // TAHAP 2: Uji Lapisan Menengah (Service + Repository)
-  // ============================================================
-  describe('Lapisan 2: PaymentService (Logic + Integration)', () => {
-    it('harus menjalankan logika bisnis dan memicu Event Publisher', async () => {
-      const orderId = 'service-test-' + Date.now();
-      
-      const payment = await service.createPayment(
-        orderId,
-        50000,
-        'midtrans',
-        'Service User',
-        'service@example.com'
-      );
+  describe('TAHAP 2: Ketangguhan Repositori (Akses Data MySQL & Sistem ORM Mikro)', () => {
+    it('harus mampu merekam Entity Murni ke MySQL dan mempertahankan struktur bentuk dasarnya (Persist)', async () => {
+      const orderId = 'repo-test-' + Date.now();
+      const payment = Payment.create(orderId, 75000, 'midtrans');
+      payment.customerName = 'Bapak Repositori';
+      payment.customerEmail = 'repo@bottomup.test';
 
-      expect(payment.getStatus()).toBe(PaymentStatus.PENDING);
-      
-      // Verifikasi Service berhasil menggunakan Repository di bawahnya
-      const checkInDb = await repository.findByOrderId(orderId);
-      expect(checkInDb).not.toBeNull();
-      expect(Number(checkInDb?.getAmount())).toBe(50000);
+      // Uji kemampuan penginjeksian data Repositori
+      await repository.save(payment);
+
+      // Menarik ulang dari ketiadaan dan mencocokkan kemiripan data
+      const retrievedPayment = await repository.findByOrderId(orderId);
+      expect(retrievedPayment).not.toBeNull();
+      expect(retrievedPayment?.customerName).toBe('Bapak Repositori');
+      expect(Number(retrievedPayment?.getAmount())).toBe(75000);
     });
 
-    it('harus menolak transisi status yang tidak valid (Business Rules)', async () => {
+    it('harus mendukung pembaruan field secara atomik untuk mencegah status tergandaan data', async () => {
+      const orderId = 'repo-update-' + Date.now();
+      const payment = Payment.create(orderId, 100000);
+      await repository.save(payment); // Disimpan sebagai PENDING terlebih dahulu
+
+      // Ambil kembali (Fetch), ubah nilai state lewat Behaviour Domain, dan Simpan Perubahannya (Commit)
+      const paymentToUpdate = await repository.findByOrderId(orderId);
+      paymentToUpdate!.expire(); // Membunuh payment karena waktu habis
+      await repository.save(paymentToUpdate!);
+
+      const finalCheck = await repository.findByOrderId(orderId);
+      expect(finalCheck?.getStatus()).toBe(PaymentStatus.EXPIRED);
+    });
+  });
+
+  describe('TAHAP 3: Mahkota Logika Bisnis (Application Service Orchestration)', () => {
+    it('harus memadukan integrasi kokoh antara PaymentGateway, Database (Repositori), dan Notifikasi Antrian (Event Publisher)', async () => {
+      const orderId = 'service-flow-' + Date.now();
+      
+      // Kita panggil jantung logika aplikasi, ini akan membedah operasi multi-lapis di belakang layar
+      const newPayment = await service.createPayment(
+        orderId,
+        185000,
+        'midtrans',
+        'Kakak Service Orchestrator',
+        'service@bottomup.test' // Parameter Email
+      );
+
+      // Verifikasi output balikan awal Servis
+      expect(newPayment.getStatus()).toBe(PaymentStatus.PENDING);
+      expect(Number(newPayment.getAmount())).toBe(185000);
+
+      // Uji Penetrasi 1: Apakah Service bertugas menitipkan data dengan baik ke Repository TAHAP 2?
+      const dbProof = await repository.findByOrderId(orderId);
+      expect(dbProof).not.toBeNull();
+
+      // Uji Penetrasi 2: Apakah Service terbukti telah mencetuskan alarm ke modul Event Publisher Eksternal (RabbitMQ)?
+      expect(publisher.publishPaymentCreated).toHaveBeenCalled();
+    });
+
+    it('harus bertindak pro-aktif sebagai Satpam Kebijakan Bisnis penolak mutasi State yang janggal', async () => {
       const orderId = 'service-logic-' + Date.now();
       await service.createPayment(orderId, 15000, 'midtrans');
 
-      // Set dulu ke FAILED
+      // Simulasi kegagalan status (Mungkin koneksi Gateway terhenti, dibatalkan via aplikasi, dll)
       await service.updatePaymentStatus(orderId, PaymentStatus.FAILED);
 
-      // Coba pindah dari FAILED ke PAID (Harus dilarang oleh aturan bisnis di Service)
+      // ATURAN BISNIS MUTLAK: Pembayaran yang GAGAL/FAILED tidak dapat dilegalkan instan menjadi PAID.
+      // Jika di sini throws error Exception, Service divalidasi bekerja dengan benar mencegah "kebocoran" sistem!
       await expect(
         service.updatePaymentStatus(orderId, PaymentStatus.PAID)
       ).rejects.toThrow('Invalid transition');
+      
+      // Bukti Konkrit: Database harus tetap aman berlindung di status aslinya
+      const finalCheck = await repository.findByOrderId(orderId);
+      expect(finalCheck?.getStatus()).toBe(PaymentStatus.FAILED);
     });
   });
 });

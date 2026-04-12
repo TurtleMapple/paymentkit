@@ -45,8 +45,8 @@ export class MidtransPaymentGateway implements PaymentGateway {
       },
       usage_limit: 1,
       expiry: {
-        duration: 24,
-        unit: 'hours',
+        duration: 15,
+        unit: 'minutes',
       },
     };
 
@@ -78,7 +78,7 @@ export class MidtransPaymentGateway implements PaymentGateway {
 
       const expiredAt = data.expiry_time 
         ? new Date(data.expiry_time) 
-        : new Date(Date.now() + 24 * 60 * 60 * 1000);
+        : new Date(Date.now() + 15 * 60 * 1000);
 
       return {
         orderId,

@@ -67,8 +67,8 @@ describe('Big Bang Integration Test: Payment Flow', () => {
       },
     };
 
-    // Act: Send POST request to /payments
-    const res = await app.request('/payments', {
+    // Act: Send POST request to /v1/payments
+    const res = await app.request('/v1/payments', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
