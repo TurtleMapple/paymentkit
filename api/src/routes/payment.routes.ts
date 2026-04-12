@@ -4,6 +4,7 @@ import {
   CreatePaymentSchema, 
   PaymentResponseSchema,
   OrderIdParamSchema,
+  PaymentActionSchema,
   GetPaymentResponseSchema,
   GetAllPaymentsQuerySchema,
   GetAllPaymentsResponseSchema
@@ -164,10 +165,21 @@ const cancelPaymentRoute = createRoute({
   path: '/{orderId}/cancel',
   tags: ['Payments'],
   summary: 'Membatalkan Transaksi',
-  description: `Membatalkan transaksi yang berstatus PENDING secara manual.`,
+  description: `Membatalkan transaksi yang berstatus PENDING secara manual. 
+  
+  Aksi ini akan:
+  1. Menghubungi API Gateway (Midtrans) untuk membatalkan transaksi/link pembayaran.
+  2. Merubah status internal menjadi CANCELLED.`,
   operationId: 'cancelPayment',
   request: {
     params: OrderIdParamSchema,
+    body: {
+      content: {
+        'application/json': {
+          schema: PaymentActionSchema,
+        },
+      },
+    },
   },
   responses: {
     200: {
@@ -205,10 +217,20 @@ const expirePaymentRoute = createRoute({
   path: '/{orderId}/expire',
   tags: ['Payments'],
   summary: 'Menandai Transaksi Kadaluarsa',
-  description: `Mensimulasikan atau menandai transaksi sebagai EXPIRED dan membatalkan tagihan di sisi vendor.`,
+  description: `Mensimulasikan atau menandai transaksi sebagai EXPIRED. 
+  
+  Berguna untuk pengujian atau jika ada pemberitahuan manual bahwa pembayaran tidak dilakukan dalam batas waktu.
+  Tetap akan memanggil API Gateway untuk memastikan link pembayaran dideaktivasi.`,
   operationId: 'expirePayment',
   request: {
     params: OrderIdParamSchema,
+    body: {
+      content: {
+        'application/json': {
+          schema: PaymentActionSchema,
+        },
+      },
+    },
   },
   responses: {
     200: {
@@ -273,9 +295,10 @@ payment.openapi(getPaymentRoute, async (c) => {
  */
 payment.openapi(cancelPaymentRoute, async (c) => {
   const { orderId } = c.req.valid('param');
+  const input = c.req.valid('json');
   const service = c.get('paymentService');
   const handler = new PaymentHandler(service);
-  return handler.cancelPayment(c, orderId) as any;
+  return handler.cancelPayment(c, orderId, input) as any;
 }, validationHook);
 
 /**
@@ -283,9 +306,10 @@ payment.openapi(cancelPaymentRoute, async (c) => {
  */
 payment.openapi(expirePaymentRoute, async (c) => {
   const { orderId } = c.req.valid('param');
+  const input = c.req.valid('json');
   const service = c.get('paymentService');
   const handler = new PaymentHandler(service);
-  return handler.expirePayment(c, orderId) as any;
+  return handler.expirePayment(c, orderId, input) as any;
 }, validationHook);
 
 export default payment;

@@ -1,5 +1,6 @@
 import { Context } from "hono";
-import { CreatePaymentInput, GetAllPaymentsQuery } from "../schemas/payment.schema";
+import { CreatePaymentInput, GetAllPaymentsQuery, PaymentActionSchema } from "../schemas/payment.schema";
+import { z } from "zod";
 import { mapPaymentToResponse } from "../utils/formatters/payment-response.formatter";
 import { PaymentStatus } from "../domain/entities/paymentStatus";
 import { v7 as uuidv7 } from 'uuid';
@@ -86,7 +87,8 @@ export class PaymentHandler {
    * POST /payments/:orderId/cancel
    * Cancels a pending payment
    */
-  cancelPayment = async (c: Context, orderId: string) => {
+  cancelPayment = async (c: Context, orderId: string, input?: z.infer<typeof PaymentActionSchema>) => {
+    // Input is received as a template for testing, currently not persisted
     const payment = await this.paymentService.cancelPayment(orderId);
 
     return c.json(
@@ -99,7 +101,8 @@ export class PaymentHandler {
    * POST /payments/:orderId/expire
    * Manually expires a pending payment
    */
-  expirePayment = async (c: Context, orderId: string) => {
+  expirePayment = async (c: Context, orderId: string, input?: z.infer<typeof PaymentActionSchema>) => {
+    // Input is received as a template for testing, currently not persisted
     const payment = await this.paymentService.expirePayment(orderId);
 
     return c.json(
