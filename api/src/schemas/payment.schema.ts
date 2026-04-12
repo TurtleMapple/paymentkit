@@ -17,6 +17,19 @@ export const CreatePaymentSchema = z.object({
 });
 
 /**
+ * Schema untuk body pada aksi payment (cancel, expire)
+ * Digunakan untuk memberikan catatan atau alasan
+ */
+export const PaymentActionSchema = z.object({
+  reason: z.string().optional().describe('Alasan pembatalan atau perubahan status').openapi({
+    example: 'User changed their mind',
+  }),
+  notes: z.string().optional().describe('Catatan tambahan').openapi({
+    example: 'Manual expiration triggered by admin',
+  }),
+});
+
+/**
  * Schema parameter path Order ID
  * Digunakan oleh endpoint GET /payments/:orderId
  */

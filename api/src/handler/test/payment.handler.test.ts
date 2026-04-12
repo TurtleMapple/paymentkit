@@ -8,6 +8,8 @@ const mockPaymentService = {
   createPayment: vi.fn(),
   getPaymentByOrderId: vi.fn(),
   getAllPayments: vi.fn(),
+  cancelPayment: vi.fn(),
+  expirePayment: vi.fn(),
 };
 
 // Mock dependensi Hono Context
@@ -95,5 +97,42 @@ describe('Payment Handler - Unit & Gray Box Testing', () => {
       });
     });
   });
+  describe('cancelPayment Endpoint', () => {
+    it('harus membatalkan pembayaran dan merespons dengan 200 OK', async () => {
+      const fakePayment = Payment.create('ORD-CANCEL', 10000);
+      fakePayment.cancel();
+      mockPaymentService.cancelPayment.mockResolvedValue(fakePayment);
 
-});
+      await handler.cancelPayment(mockContext, 'ORD-CANCEL');
+
+      expect(mockPaymentService.cancelPayment).toHaveBeenCalledWith('ORD-CANCEL');
+      expect(mockContext.json).toHaveBeenCalledWith(
+        expect.objectContaining({ 
+          success: true,
+          data: expect.objectContaining({ orderId: 'ORD-CANCEL', status: 'CANCELLED' })
+        }),
+        HttpStatus.OK
+      );
+    });
+  });
+
+  describe('expirePayment Endpoint', () => {
+    it('harus mengubah status menjadi expire dan merespons dengan 200 OK', async () => {
+      const fakePayment = Payment.create('ORD-EXPIRE', 10000);
+      fakePayment.expire();
+      mockPaymentService.expirePayment.mockResolvedValue(fakePayment);
+
+      await handler.expirePayment(mockContext, 'ORD-EXPIRE');
+
+      expect(mockPaymentService.expirePayment).toHaveBeenCalledWith('ORD-EXPIRE');
+      expect(mockContext.json).toHaveBeenCalledWith(
+        expect.objectContaining({ 
+          success: true,
+          data: expect.objectContaining({ orderId: 'ORD-EXPIRE', status: 'EXPIRED' })
+        }),
+        HttpStatus.OK
+      );
+    });
+  });
+
+});

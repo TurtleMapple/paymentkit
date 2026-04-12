@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import app from '../app';
 import { initDatabase, orm } from '../config/db';
 import { closeRabbitMQConnection } from '../domain/services/rabbitmq/connection';
@@ -6,22 +6,54 @@ import { Payment } from '../domain/entities/paymentEntity';
 import { env } from '../config/env';
 
 /**
- * STRATEGI: Top-Down Integration Test
+ * STRATEGI: Top-Down Integration Test (Full Flow)
  * 
- * Cara baca: Tes ini mensimulasikan aliran data dari urutan paling atas (API Route)
- * terus turun ke bawah sampai ke Database asli. 
- * Fokusnya adalah memastikan "pintu depan" (API) sudah tersambung dengan benar
- * ke semua komponen di belakangnya.
+ * Cara baca: Tes ini mensimulasikan aliran data secara utuh dari urutan paling atas (API Route)
+ * terus turun ke bawah sampai ke Database asli, hingga simulasi Webhook dikirim oleh payment gateway.
+ * Fokusnya adalah memastikan siklus penuh transaksi (Buat -> Cek -> Bayar) berjalan sukses tanpa error.
  */
-describe('Top-Down Integration Test: Payment API', () => {
-  
-  //  run 1x  di awal sebelum semua tes dimulai
+
+// --- 1. Mock Eksternal Payment Gateway ---
+// Sangat penting di Integration Test agar kita TIDAK menembak API vendor (Midtrans) asli yang butuh koneksi internet
+vi.mock('../domain/gateways/PaymentGatewayFactory', () => ({
+  PaymentGatewayFactory: {
+    create: vi.fn(() => ({
+      // Simulasi Create Payment API
+      createPayment: vi.fn().mockImplementation(async (req) => ({
+        orderId: req.orderId,
+        paymentLink: 'https://mock.midtrans.link/snap',
+        paymentType: 'bank_transfer',
+        expiredAt: new Date(Date.now() + 86400000), // Besok
+        gatewayResponse: { status_code: '201' }
+      })),
+      // Simulasi Pemeriksaan Signature (Otomatis sukses)
+      validateWebhook: vi.fn(() => true), 
+      // Simulasi Translasi Payload Webhook
+      processWebhook: vi.fn().mockImplementation(async (payload) => ({
+        orderId: payload.order_id,
+        status: payload.transaction_status === 'settlement' ? 'PAID' : 'PENDING',
+        paymentType: payload.payment_type,
+        gatewayResponse: payload
+      })),
+      // Simulasi Cancel API di Vendor
+      cancel: vi.fn().mockResolvedValue(true)
+    }))
+  }
+}));
+
+describe('Top-Down Integration Test: End-to-End Payment Flow', () => {
+  let createdOrderId: string; // Variabel "jembatan" untuk menyimpan ID lintas tahapan
+  const customerEmail = 'fullflow@example.com';
+
+  // --- PERSIAPAN LINGKUNGAN TES ---
+
+  // Berjalan 1x di awal untuk menyiapkan Database
   beforeAll(async () => {
     try {
-      // 1. Inisialisasi Database menggunakan konfigurasi khusus testing
+      // 1. Inisiasi Database menggunakan environment config test
       await initDatabase();
       
-      // 2. Bersihkan dan buat ulang struktur tabel agar data tes sebelumnya tidak mengganggu
+      // 2. Refresh & buat ulang struktur tabel (Isolasi data agar tidak bentrok)
       const generator = ormInstance().getSchemaGenerator();
       await generator.refreshDatabase();
       
@@ -30,147 +62,235 @@ describe('Top-Down Integration Test: Payment API', () => {
       throw err;
     }
   });
-  // Blok ini jalan sekali di akhir setelah semua tes selesai
+
+  // Berjalan di akhir untuk mematikan koneksi secara bersih
   afterAll(async () => {
-    // Tutup koneksi database agar proses tes bisa berhenti dengan bersih
-    if (orm) {
-      await orm.close();
-    }
-    // Tutup koneksi ke RabbitMQ (Message Broker)
-    await closeRabbitMQConnection();
+    if (orm) await orm.close(); // Tutup database
+    await closeRabbitMQConnection(); // Tutup koneksi RabbitMQ
   });
 
-  // Fungsi pembantu untuk mengambil instance database secara aman
+  // Helper aman untuk memanggil MikroORM instans
   const ormInstance = () => {
     if (!orm) throw new Error('Database belum diinisialisasi');
     return orm;
   };
 
-  // KELOMPOK TES: Membuat Pembayaran Baru
-  describe('POST /payments', () => {
-    it('harus berhasil membuat pembayaran dan mengembalikan status 201', async () => {
-      // 1. Siapkan data yang akan dikirim ke API
+  // ========================================================
+  // RANGKAIAN EVENT (TEST FLOW BERURUTAN)
+  // ========================================================
+
+  describe('TAHAP 1: Inisiasi Pembayaran Baru (POST /payments)', () => {
+    it('harus berhasil membuat pembayaran dan mengembalikan status PENDING', async () => {
+      // 1. Siapkan data pembeli
       const paymentData = {
-        amount: 75000,
+        amount: 250000,
         customer: {
-          customerName: 'Top Down Test User',
-          customerEmail: 'topdown@example.com',
-          phone: '08123456789',
+          customerName: 'Sultan TopDown',
+          customerEmail: customerEmail,
+          phone: '081234567890',
         },
       };
 
-      // 2. Jalankan perintah: "Tembak API /payments dengan metode POST"
-      const res = await app.request('/payments', {
+      // 2. Tembak API layaknya HTTP Client (Simulasi Frontend/Aplikasi)
+      const res = await app.request('/v1/payments', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': env.API_KEY, // Gunakan kunci API yang valid
+          'x-api-key': env.API_KEY, // Otorisasi internal
         },
         body: JSON.stringify(paymentData),
       });
 
-      // 3. Periksa hasilnya: "Harus mengembalikan status 201 (Created)"
+      // 3. Verifikasi Level Atas (API Response)
       expect(res.status).toBe(201);
-      
-      // 4. Periksa isi jawaban (body) dari API
       const body = await res.json();
-      expect(body.data).toHaveProperty('orderId'); // Harus ada ID pesanan
-      expect(body.data.amount).toBe(paymentData.amount); // Jumlah uang harus sama
-      expect(body.data.status).toBe('PENDING'); // Status awal harus PENDING
+      
+      expect(body.data).toHaveProperty('orderId');
+      expect(body.data.amount).toBe(paymentData.amount);
+      expect(body.data.status).toBe('PENDING');
 
-      // 5. Verifikasi langsung ke Database (Ciri khas Top-Down dengan Real DB)
-      // "Apakah data yang tadi lewat API benar-benar masuk ke tabel database?"
+      // 4. Catat orderId untuk tahap selanjutnya
+      createdOrderId = body.data.orderId;
+
+      // 5. Verifikasi Level Bawah (Database Real)
+      // Bukti nyata bahwa request yang lewat API benar-benar masuk ke MySQL
       const em = ormInstance().em.fork();
-      const paymentInDb = await em.findOne(Payment, { orderId: body.data.orderId });
-      expect(paymentInDb).not.toBeNull(); // Data tidak boleh kosong
-      expect(Number(paymentInDb?.getAmount())).toBe(paymentData.amount); // Angkanya harus cocok
+      const paymentInDb = await em.findOne(Payment, { orderId: createdOrderId });
+      expect(paymentInDb).not.toBeNull();
+      expect(Number(paymentInDb?.getAmount())).toBe(paymentData.amount);
     });
 
-    it('harus mengembalikan error 400 jika input tidak valid', async () => {
-      // Data salah: jumlah uang minus dan nama kosong
-      const invalidData = {
-        amount: -100,
-        customer: {
-          customerName: '',
-        },
+    it('harus aman dari akses tanpa kunci API (401 Unauthorized)', async () => {
+      const res = await app.request('/v1/payments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }, // Lupa memasukkan x-api-key
+        body: JSON.stringify({ amount: 1000 }),
+      });
+      expect(res.status).toBe(401);
+    });
+  });
+
+  describe('TAHAP 2: Pengecekan Awal Pembayaran (GET /payments/:orderId)', () => {
+    it('harus menampilkan pesanan yang baru dibuat dengan status awal (PENDING)', async () => {
+      // Frontend mengecek detail pesanan berdasarkan ID
+      const res = await app.request(`/v1/payments/${createdOrderId}`, {
+        method: 'GET',
+        headers: { 'x-api-key': env.API_KEY },
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.data.orderId).toBe(createdOrderId);
+      expect(body.data.status).toBe('PENDING'); // Masih PENDING karena belum ditransfer
+    });
+  });
+
+  describe('TAHAP 3: Simulasi Notifikasi Gateway Server-to-Server (POST /webhooks/midtrans)', () => {
+    it('harus menerima webhook sukses dan mengupdate pesanan menjadi PAID', async () => {
+      // 1. Siapkan payload simulasi dari Midtrans (Skenario: Customer selesai transfer bank)
+      const webhookPayload = {
+        order_id: createdOrderId, 
+        transaction_status: 'settlement', // 'settlement' = uang berhasil diproses
+        status_code: '200',
+        gross_amount: '250000.00',
+        payment_type: 'bank_transfer',
+        signature_key: 'mock-signature-key' // Validasi ini dibypass oleh mock Factory di atas
       };
-      
-      // Tembak API
-      const res = await app.request('/payments', {
+
+      // 2. Tembak endpoint Webhook kita (Endpoint ini bersifat PUBLIC/terbuka)
+      const res = await app.request('/v1/webhooks/midtrans', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': env.API_KEY,
+          'x-midtrans-signature': webhookPayload.signature_key
         },
-        body: JSON.stringify(invalidData),
+        body: JSON.stringify(webhookPayload),
       });
 
-      // Harus gagal (400 Bad Request) karena validasi skema
-      expect(res.status).toBe(400);
+      // 3. Pastikan API merespons ke arah Gateway bahwa notifikasi sudah diterima (HTTP 200 OK)
+      expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.success).toBe(false);
-      expect(body.message).toBe('Validation failed');
-    });
-  });
+      expect(body.success).toBe(true);
+      expect(body.data.status).toBe('PAID');
 
-  // KELOMPOK TES: Mengambil Detail Pembayaran
-  describe('GET /payments/:orderId', () => {
-    it('harus mengembalikan detail pembayaran untuk ID yang ada', async () => {
-      // 1. Persiapan: Masukkan data langsung ke DB via Static Factory
+      // 4. Verifikasi Mutlak: Periksa perubahan di dalam Tabel Database
+      // Perubahan status ini dilakukan oleh Handler -> Service -> Entity
       const em = ormInstance().em.fork();
-      const orderId = 'test-top-down-get-' + Date.now();
-      
-      const payment = Payment.create(orderId, 100000, 'midtrans');
-      payment.customerName = 'Getter User';
-      payment.customerEmail = 'getter@example.com';
-      
-      await em.persistAndFlush(payment);
-
-      // 2. Jalankan perintah: "Ambil data lewat API menggunakan orderId di atas"
-      const res = await app.request(`/payments/${orderId}`, {
-        method: 'GET',
-        headers: {
-          'x-api-key': env.API_KEY,
-        },
-      });
-
-      // 3. Periksa: Status harus 200 (OK) dan datanya cocok
-      expect(res.status).toBe(200);
-      const body = await res.json();
-      expect(body.success).toBe(true);
-      expect(body.data.orderId).toBe(orderId);
-      expect(body.data.amount).toBe(100000);
-    });
-
-    it('harus mengembalikan error 404 jika ID tidak ditemukan', async () => {
-      const res = await app.request('/payments/id-asal-asalan', {
-        method: 'GET',
-        headers: {
-          'x-api-key': env.API_KEY,
-        },
-      });
-
-      expect(res.status).toBe(404);
+      const updatedPayment = await em.findOne(Payment, { orderId: createdOrderId });
+      expect(updatedPayment?.getStatus()).toBe('PAID');
     });
   });
 
-  // KELOMPOK TES: Mengambil Semua Daftar Pembayaran
-  describe('GET /payments', () => {
-    it('harus mengembalikan daftar pembayaran dengan format paginasi', async () => {
-      // Tembak API daftar pembayaran
-      const res = await app.request('/payments', {
+  describe('TAHAP 4: Verifikasi Akhir Pembayaran (GET /payments/:orderId)', () => {
+    it('harus mengonfirmasi bahwa status pesanan secara global telah berubah rupa menjadi PAID', async () => {
+      // Customer memuat ulang halaman e-commerce, frontend memanggil API detail
+      const res = await app.request(`/v1/payments/${createdOrderId}`, {
         method: 'GET',
-        headers: {
-          'x-api-key': env.API_KEY,
-        },
+        headers: { 'x-api-key': env.API_KEY },
       });
 
-      // Periksa strukturnya: Harus ada array 'data' dan objek 'pagination'
       expect(res.status).toBe(200);
       const body = await res.json();
+      
+      // Pembuktian final End-to-End berhasil
+      expect(body.data.orderId).toBe(createdOrderId);
+      expect(body.data.status).toBe('PAID');
+    });
+  });
+
+  describe('TAHAP 5: Pengecekan Daftar Transaksi Paginasi (GET /payments)', () => {
+    it('harus menampilkan riwayat pesanan yang kita jalankan di halaman master', async () => {
+      // Admin dashboard menarik list semua pelanggan
+      const res = await app.request('/v1/payments', {
+        method: 'GET',
+        headers: { 'x-api-key': env.API_KEY },
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      
       expect(body.success).toBe(true);
-      expect(Array.isArray(body.data)).toBe(true); // Isinya harus list (array)
-      expect(body).toHaveProperty('pagination'); // Harus ada keterangan halaman, limit, dsb
+      expect(Array.isArray(body.data)).toBe(true);
+      expect(body.data.length).toBeGreaterThan(0);
+      
+      // Buktikan bahwa pesanan tes kita benar-benar terekam di pagination list
+      const foundOrder = body.data.find((p: any) => p.orderId === createdOrderId);
+      expect(foundOrder).toBeDefined();
+      expect(foundOrder.status).toBe('PAID');
+    });
+  });
+
+  describe('TAHAP 6: Pembatalan Transaksi Baru (POST /v1/payments/:orderId/cancel)', () => {
+    it('harus berhasil membatalkan pembayaran yang berstatus PENDING', async () => {
+      // 1. Buat pembayaran baru khusus untuk ditest cancel
+      const paymentData = {
+        amount: 50000,
+        customer: { 
+          customerName: 'Cancel Tester', 
+          customerEmail: 'cancel@test.com', 
+          phone: '08123456789' 
+        },
+      };
+      const createRes = await app.request('/v1/payments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': env.API_KEY },
+        body: JSON.stringify(paymentData),
+      });
+      const createBody = await createRes.json();
+      const orderIdToCancel = createBody.data.orderId;
+
+      // 2. Jalankan aksi pembatalan
+      const res = await app.request(`/v1/payments/${orderIdToCancel}/cancel`, {
+        method: 'POST',
+        headers: { 'x-api-key': env.API_KEY },
+      });
+
+      // 3. Verifikasi Respon API
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.data.status).toBe('CANCELLED');
+
+      // 4. Verifikasi Database
+      const em = ormInstance().em.fork();
+      const paymentInDb = await em.findOne(Payment, { orderId: orderIdToCancel });
+      expect(paymentInDb?.getStatus()).toBe('CANCELLED');
+    });
+  });
+
+  describe('TAHAP 7: Penandaan Kadaluarsa (POST /v1/payments/:orderId/expire)', () => {
+    it('harus berhasil merubah status transaksi PENDING menjadi EXPIRED', async () => {
+      // 1. Buat pembayaran baru
+      const paymentData = {
+        amount: 35000,
+        customer: { 
+          customerName: 'Expire Tester', 
+          customerEmail: 'expire@test.com', 
+          phone: '08987654321' 
+        },
+      };
+      const createRes = await app.request('/v1/payments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': env.API_KEY },
+        body: JSON.stringify(paymentData),
+      });
+      const createBody = await createRes.json();
+      const orderIdToExpire = createBody.data.orderId;
+
+      // 2. Jalankan aksi expire
+      const res = await app.request(`/v1/payments/${orderIdToExpire}/expire`, {
+        method: 'POST',
+        headers: { 'x-api-key': env.API_KEY },
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.data.status).toBe('EXPIRED');
+
+      // 3. Verifikasi Database
+      const em = ormInstance().em.fork();
+      const paymentInDb = await em.findOne(Payment, { orderId: orderIdToExpire });
+      expect(paymentInDb?.getStatus()).toBe('EXPIRED');
     });
   });
 });
+

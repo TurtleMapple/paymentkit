@@ -21,6 +21,7 @@ describe('PaymentService', () => {
   // Mock Gateway Instance
   const mockGateway = {
     createPayment: vi.fn(),
+    cancel: vi.fn(),
   };
 
   beforeEach(() => {
@@ -125,6 +126,52 @@ describe('PaymentService', () => {
 
       expect(result).toBe(existingPayment);
       expect(mockRepo.save).toHaveBeenCalledTimes(0);
+    });
+  });
+  describe('cancelPayment()', () => {
+    it('harus membatalkan pembayaran di gateway dan merubah status ke CANCELLED', async () => {
+      const orderId = 'ORD-123';
+      const existingPayment = Payment.create(orderId, 10000, 'midtrans');
+
+      vi.mocked(mockRepo.findByOrderId).mockResolvedValue(existingPayment);
+      vi.mocked(mockGateway.cancel).mockResolvedValue(true);
+      vi.mocked(mockRepo.save).mockResolvedValue(undefined);
+
+      const result = await paymentService.cancelPayment(orderId);
+
+      expect(result.getStatus()).toBe(PaymentStatus.CANCELLED);
+      expect(mockGateway.cancel).toHaveBeenCalledWith(orderId);
+      expect(mockRepo.save).toHaveBeenCalled();
+      expect(mockPublisher.publishPaymentUpdated).toHaveBeenCalledWith(orderId, PaymentStatus.CANCELLED);
+    });
+
+    it('harus melempar error jika status bukan PENDING', async () => {
+      const orderId = 'ORD-123';
+      const existingPayment = Payment.create(orderId, 10000);
+      existingPayment.complete(); // Status: PAID
+
+      vi.mocked(mockRepo.findByOrderId).mockResolvedValue(existingPayment);
+
+      await expect(paymentService.cancelPayment(orderId))
+        .rejects.toThrow(/Cannot cancel payment with status/);
+    });
+  });
+
+  describe('expirePayment()', () => {
+    it('harus membatalkan pembayaran di gateway dan merubah status ke EXPIRED', async () => {
+      const orderId = 'ORD-123';
+      const existingPayment = Payment.create(orderId, 10000, 'midtrans');
+
+      vi.mocked(mockRepo.findByOrderId).mockResolvedValue(existingPayment);
+      vi.mocked(mockGateway.cancel).mockResolvedValue(true);
+      vi.mocked(mockRepo.save).mockResolvedValue(undefined);
+
+      const result = await paymentService.expirePayment(orderId);
+
+      expect(result.getStatus()).toBe(PaymentStatus.EXPIRED);
+      expect(mockGateway.cancel).toHaveBeenCalledWith(orderId);
+      expect(mockRepo.save).toHaveBeenCalled();
+      expect(mockPublisher.publishPaymentUpdated).toHaveBeenCalledWith(orderId, PaymentStatus.EXPIRED);
     });
   });
 });

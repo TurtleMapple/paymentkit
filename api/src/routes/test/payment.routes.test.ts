@@ -18,6 +18,8 @@ vi.mock('../../handler/payment.handler', () => {
       createPayment = vi.fn(async (c) => c.json({ success: true, message: 'Mocked Create SUCCESS' }, 201));
       getAllPayments = vi.fn(async (c) => c.json({ success: true, message: 'Mocked List SUCCESS' }, 200));
       getPaymentByOrderId = vi.fn(async (c) => c.json({ success: true, message: 'Mocked Detail SUCCESS' }, 200));
+      cancelPayment = vi.fn(async (c) => c.json({ success: true, message: 'Mocked Cancel SUCCESS' }, 200));
+      expirePayment = vi.fn(async (c) => c.json({ success: true, message: 'Mocked Expire SUCCESS' }, 200));
     }
   };
 });
@@ -89,6 +91,31 @@ describe('Payment Routes (Unit Test - Isolated)', () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.message).toBe('Mocked Detail SUCCESS');
+    });
+  });
+  describe('POST /payments/:orderId/cancel', () => {
+    it('harus berhasil memetakan rute cancel dengan auth', async () => {
+      const res = await testApp.request('/payments/ORD-TEST-123/cancel', {
+        method: 'POST',
+        headers: { 'x-api-key': validKey }
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.message).toBe('Mocked Cancel SUCCESS');
+    });
+  });
+
+  describe('POST /payments/:orderId/expire', () => {
+    it('harus berhasil memetakan rute expire dengan auth', async () => {
+      const res = await testApp.request('/payments/ORD-TEST-123/expire', {
+        method: 'POST',
+        headers: { 'x-api-key': validKey }
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.message).toBe('Mocked Expire SUCCESS');
     });
   });
 });

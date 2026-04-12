@@ -18,7 +18,9 @@
     "dev:worker": "tsx --watch src/worker/index.ts",
     "test": "vitest",
     "test:run": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:unit": "vitest run --exclude \"src/integration/**\"",
+    "test:integration": "vitest run src/integration --fileParallelism false"
   },
   "keywords": [],
   "author": "",

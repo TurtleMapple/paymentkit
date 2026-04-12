@@ -142,6 +142,46 @@ export class PaymentService {
   }
 
   /**
+   * Use Case: Membatalkan pembayaran secara manual
+   */
+  async cancelPayment(orderId: string): Promise<Payment> {
+    const payment = await this.repo.findByOrderId(orderId);
+    if (!payment) {
+      throw new Error(`Payment not found: ${orderId}`);
+    }
+
+    if (payment.getStatus() !== PaymentStatus.PENDING) {
+      throw new Error(`Cannot cancel payment with status ${payment.getStatus()}`);
+    }
+
+    // Call gateway to invalidate payment link
+    const gateway = PaymentGatewayFactory.create(payment.gateway);
+    await gateway.cancel(orderId);
+
+    return await this.updatePaymentStatus(orderId, PaymentStatus.CANCELLED);
+  }
+
+  /**
+   * Use Case: Menandai pembayaran sebagai kadaluarsa
+   */
+  async expirePayment(orderId: string): Promise<Payment> {
+    const payment = await this.repo.findByOrderId(orderId);
+    if (!payment) {
+      throw new Error(`Payment not found: ${orderId}`);
+    }
+
+    if (payment.getStatus() !== PaymentStatus.PENDING) {
+      throw new Error(`Cannot expire payment with status ${payment.getStatus()}`);
+    }
+
+    // Since Midtrans doesn't have an explicit 'expire', we use 'cancel' to kill the link
+    const gateway = PaymentGatewayFactory.create(payment.gateway);
+    await gateway.cancel(orderId);
+
+    return await this.updatePaymentStatus(orderId, PaymentStatus.EXPIRED);
+  }
+
+  /**
    * Use Case: Mendapatkan detail pembayaran tunggal
    */
   async getPaymentByOrderId(orderId: string): Promise<Payment | null> {

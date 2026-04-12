@@ -4,6 +4,7 @@ import {
   CreatePaymentSchema, 
   PaymentResponseSchema,
   OrderIdParamSchema,
+  PaymentActionSchema,
   GetPaymentResponseSchema,
   GetAllPaymentsQuerySchema,
   GetAllPaymentsResponseSchema
@@ -157,6 +158,109 @@ const getPaymentRoute = createRoute({
 });
 
 /**
+ * POST /payments/:orderId/cancel route definition
+ */
+const cancelPaymentRoute = createRoute({
+  method: 'post',
+  path: '/{orderId}/cancel',
+  tags: ['Payments'],
+  summary: 'Membatalkan Transaksi',
+  description: `Membatalkan transaksi yang berstatus PENDING secara manual. 
+  
+  Aksi ini akan:
+  1. Menghubungi API Gateway (Midtrans) untuk membatalkan transaksi/link pembayaran.
+  2. Merubah status internal menjadi CANCELLED.`,
+  operationId: 'cancelPayment',
+  request: {
+    params: OrderIdParamSchema,
+    body: {
+      content: {
+        'application/json': {
+          schema: PaymentActionSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      content: {
+        'application/json': {
+          schema: GetPaymentResponseSchema,
+        },
+      },
+      description: 'Payment cancelled successfully',
+    },
+    400: {
+      content: {
+        'application/json': {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: 'Payment cannot be cancelled',
+    },
+    404: {
+      content: {
+        'application/json': {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: 'Payment not found',
+    },
+  },
+});
+
+/**
+ * POST /payments/:orderId/expire route definition
+ */
+const expirePaymentRoute = createRoute({
+  method: 'post',
+  path: '/{orderId}/expire',
+  tags: ['Payments'],
+  summary: 'Menandai Transaksi Kadaluarsa',
+  description: `Mensimulasikan atau menandai transaksi sebagai EXPIRED. 
+  
+  Berguna untuk pengujian atau jika ada pemberitahuan manual bahwa pembayaran tidak dilakukan dalam batas waktu.
+  Tetap akan memanggil API Gateway untuk memastikan link pembayaran dideaktivasi.`,
+  operationId: 'expirePayment',
+  request: {
+    params: OrderIdParamSchema,
+    body: {
+      content: {
+        'application/json': {
+          schema: PaymentActionSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      content: {
+        'application/json': {
+          schema: GetPaymentResponseSchema,
+        },
+      },
+      description: 'Payment expired successfully',
+    },
+    400: {
+      content: {
+        'application/json': {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: 'Payment cannot be expired',
+    },
+    404: {
+      content: {
+        'application/json': {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: 'Payment not found',
+    },
+  },
+});
+
+/**
  * Register POST /payments endpoint
  */
 payment.openapi(createPaymentRoute, async (c) => {
@@ -184,6 +288,28 @@ payment.openapi(getPaymentRoute, async (c) => {
   const service = c.get('paymentService');
   const handler = new PaymentHandler(service);
   return handler.getPaymentByOrderId(c, orderId) as any;
+}, validationHook);
+
+/**
+ * Register POST /payments/:orderId/cancel endpoint
+ */
+payment.openapi(cancelPaymentRoute, async (c) => {
+  const { orderId } = c.req.valid('param');
+  const input = c.req.valid('json');
+  const service = c.get('paymentService');
+  const handler = new PaymentHandler(service);
+  return handler.cancelPayment(c, orderId, input) as any;
+}, validationHook);
+
+/**
+ * Register POST /payments/:orderId/expire endpoint
+ */
+payment.openapi(expirePaymentRoute, async (c) => {
+  const { orderId } = c.req.valid('param');
+  const input = c.req.valid('json');
+  const service = c.get('paymentService');
+  const handler = new PaymentHandler(service);
+  return handler.expirePayment(c, orderId, input) as any;
 }, validationHook);
 
 export default payment;

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import app from '../app';
 import { initDatabase, orm } from '../config/db';
 import { closeRabbitMQConnection } from '../domain/services/rabbitmq/connection';
@@ -9,21 +9,48 @@ import { env } from '../config/env';
 /**
  * STRATEGI: Hybrid (Sandwich) Integration Test
  * 
- * Cara baca: Tes ini disebut Sandwich karena kita "menjepit" Logika Bisnis (Service)
- * dari dua sisi sekaligus:
- * 1. Dari Atas: Menggunakan request HTTP (API/Route).
- * 2. Dari Bawah: Melakukan verifikasi langsung ke Database (Repository/Entity).
+ * Filosofi: Tes ini menggunakan pendekatan "Sandwich", di mana kita menjepit logika bisnis aplikasi 
+ * dari dua poros ekstrem sekaligus:
+ * - Arah Atas (Eksternal)  : Menggunakan pemanggilan endpoint API (HTTP Request/Response).
+ * - Arah Bawah (Internal)  : Menyelam langsung ke Database memverifikasi status Entity.
  * 
- * Titik fokusnya adalah memastikan aliran data utuh dan aturan bisnis di tengah (Service)
- * berjalan dengan benar saat dipicu oleh aksi dari luar.
+ * Tujuannya adalah untuk mendeteksi deviasi/ketidakcocokan antara data yang ditampilkan oleh API
+ * dengan data state (keadaan) fisik sebenarnya yang tertanam di level persisten MySQL.
  */
-describe('Hybrid Integration Test: Payment Flow (Sandwich)', () => {
+
+// --- MOCK PAYMENT GATEWAY ---
+// Mencegah tembakan asli ke API pihak ketiga (Midtrans) dan menjaga efisiensi execution time di pipeline CI/CD
+vi.mock('../domain/gateways/PaymentGatewayFactory', () => ({
+  PaymentGatewayFactory: {
+    create: vi.fn(() => ({
+      createPayment: vi.fn().mockImplementation(async (req) => ({
+        orderId: req.orderId,
+        paymentLink: 'https://mock.hybrid.midtrans.link/',
+        paymentType: 'bank_transfer',
+        expiredAt: new Date(Date.now() + 86400000), // Kedaluwarsa 24 jam ke depan
+        gatewayResponse: { mocked: true }
+      })),
+      validateWebhook: vi.fn(() => true),
+      processWebhook: vi.fn().mockImplementation(async (payload) => ({
+        orderId: payload.order_id,
+        status: payload.transaction_status || 'PAID',
+        paymentType: payload.payment_type,
+        gatewayResponse: payload
+      })),
+      cancel: vi.fn().mockResolvedValue(true)
+    }))
+  }
+}));
+
+
+describe('Hybrid Integration Test: Payment Sandwich Validation', () => {
+  // Berjalan 1x di awal untuk menyiapkan Database
   beforeAll(async () => {
     try {
       // 1. Inisialisasi Database
       await initDatabase();
       
-      // 2. Refresh Schema (Isolasi data untuk pengujian)
+      // 2. Refresh Schema (Membersihkan data lampau untuk isolasi pengujian)
       const generator = orm!.getSchemaGenerator();
       await generator.refreshDatabase();
       
@@ -33,28 +60,30 @@ describe('Hybrid Integration Test: Payment Flow (Sandwich)', () => {
     }
   });
 
+  // Berjalan di akhir untuk mematikan koneksi secara bersih
   afterAll(async () => {
-    if (orm) {
-      await orm.close();
-    }
-    await closeRabbitMQConnection();
+    if (orm) await orm.close(); // Tutup database
+    await closeRabbitMQConnection(); // Tutup RabbitMQ
   });
 
-  // Skema "Sandwich" 1: Alur Pembuatan Pembayaran (Pemicu dari API -> Dampak ke DB)
-  describe('Alur: Create -> Verify DB Persistence', () => {
-    it('harus memproses pembayaran via API dan datanya tersimpan benar di level Database', async () => {
+  // =========================================================================
+  // SKENARIO SANDWICH 1: Pemicu Eksternal (API) ➔ Diverifikasi Internal (DB)
+  // =========================================================================
+  describe('Alur A: Top-Down Creation (Create API -> Cek DB Persistence)', () => {
+    it('harus memproses pembayaran via API (Atas) dan tersimpan identik di Database (Bawah)', async () => {
       const orderId = 'hybrid-create-' + Date.now();
       const payload = {
-        amount: 150000,
+        amount: 300000,
         customer: {
-          customerName: 'Hybrid User',
-          customerEmail: 'hybrid@example.com',
-          phone: '08123456789',
+          customerName: 'Hybrid Tester',
+          customerEmail: 'tester@hybrid.com',
+          phone: '081122334455',
         },
       };
 
       // --- SISI ATAS (HTTP Request) ---
-      const res = await app.request('/payments', {
+      // User memicu pembuatan pesanan melalu REST API
+      const res = await app.request('/v1/payments', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -63,14 +92,17 @@ describe('Hybrid Integration Test: Payment Flow (Sandwich)', () => {
         body: JSON.stringify(payload),
       });
 
+      // API Harus menjawab OK dan terekam sistem
       expect(res.status).toBe(201);
       const body = await res.json();
+      expect(body.data.orderId).toBeDefined();
 
-      // --- SISI BAWAH (Database Verification) ---
-      // Kita langsung "turun" ke database untuk memastikan Service bekerja dengan Repository
+      // --- SISI BAWAH (Database Validation) ---
+      // Kita meloncat ke "basement" sistem. Membaca langsung dari tabel / Entity
       const em = orm!.em.fork();
       const paymentInDb = await em.findOne(Payment, { orderId: body.data.orderId });
 
+      // Fakta membuktikan API memberikan impact sampai ke MySQL
       expect(paymentInDb).not.toBeNull();
       expect(paymentInDb?.getStatus()).toBe(PaymentStatus.PENDING);
       expect(Number(paymentInDb?.getAmount())).toBe(payload.amount);
@@ -78,43 +110,49 @@ describe('Hybrid Integration Test: Payment Flow (Sandwich)', () => {
     });
   });
 
-  // Skema "Sandwich" 2: Alur Update & Konsistensi State
-  describe('Alur: Polling Detail -> Internal Synchronization', () => {
-    it('harus sinkron antara data yang ditarik via API dengan data yang ada di level bawah', async () => {
-      // 1. Setup: Buat data langsung di level bawah (Database) via Static Factory
+  // =========================================================================
+  // SKENARIO SANDWICH 2: Seeding Internal (DB) ➔ Diverifikasi Eksternal (API)
+  // =========================================================================
+  describe('Alur B: Bottom-Up Polling (Seeding DB -> Polling Data di API)', () => {
+    it('harus mensinkronkan rupa data buatan (seeding) di DB agar utuh ketika dipanggil via API', async () => {
+      // --- SISI BAWAH (Database Setup) ---
+      // 1. Data disuntikkan secara keras via Static Factory ke dalam barisan tabel (MySQL)
       const em = orm!.em.fork();
       const orderId = 'hybrid-sync-' + Date.now();
       
-      const payment = Payment.create(orderId, 45000, 'midtrans');
-      payment.customerName = 'Sync User';
+      const payment = Payment.create(orderId, 55000, 'midtrans');
+      payment.customerName = 'Silent Injector';
       
       await em.persistAndFlush(payment);
 
-      // 2. --- SISI ATAS (API Request) ---
-      // Ambil detail pembayaran lewat pintu depan
-      const res = await app.request(`/payments/${orderId}`, {
+      // --- SISI ATAS (HTTP Request) ---
+      // 2. Client me-*request* detail pesanan, menguji apakah API merender data baselayer dengan utuh
+      const res = await app.request(`/v1/payments/${orderId}`, {
         method: 'GET',
         headers: {
           'x-api-key': env.API_KEY,
         },
       });
 
+      // 3. Verifikasi Identitas
       expect(res.status).toBe(200);
       const responseBody = await res.json();
 
-      // 3. --- VERIFIKASI ---
-      // Pastikan apa yang dikembalikan API (Atas) ISINYA SAMA dengan apa yang kita buat di DB (Bawah)
+      // Memastikan Atas (API) me-reflect Bawah (DB) tanpa distorsi data
       expect(responseBody.data.orderId).toBe(orderId);
-      expect(responseBody.data.amount).toBe(45000);
+      expect(responseBody.data.amount).toBe(55000);
       expect(responseBody.data.status).toBe(PaymentStatus.PENDING);
     });
   });
 
-  // Skema "Sandwich" 3: Penanganan Data Kompleks (Paginasi Luar vs Count Dalam)
-  describe('Alur: Bulk Integration Check', () => {
-    it('harus memiliki jumlah data yang konsisten antara API response dan Database count', async () => {
-      // Tembak API All Payments
-      const res = await app.request('/payments', {
+  // =========================================================================
+  // SKENARIO SANDWICH 3: Ekstraksi Skala Besar (Sistemik Metrics)
+  // =========================================================================
+  describe('Alur C: Bulk Integration Comparison (Metadata API vs Database Count)', () => {
+    it('harus selaras secara jumlah antara perhitungan paginasi API dengan jumlah Record row DB', async () => {
+      // --- SISI ATAS (Metadata API View) ---
+      // Menarik semua riwayat pesanan
+      const res = await app.request('/v1/payments', {
         method: 'GET',
         headers: {
           'x-api-key': env.API_KEY,
@@ -122,14 +160,73 @@ describe('Hybrid Integration Test: Payment Flow (Sandwich)', () => {
       });
 
       const body = await res.json();
-      const apiTotal = body.pagination.total;
+      const apiTotalCount = body.pagination.total;
 
-      // Verifikasi langsung ke DB count
+      // --- SISI BAWAH (Query Metric View) ---
+      // Menghitung raw data non-deleted (Count from DB)
       const em = orm!.em.fork();
-      const dbTotal = await em.count(Payment, { deletedAt: null });
+      const dbRealCount = await em.count(Payment, { deletedAt: null });
 
-      // Kekuatan Hybrid: Memastikan metrics di API (Atas) SAMA PERSIS dengan kenyataan di DB (Bawah)
-      expect(apiTotal).toBe(dbTotal);
+      // --- VERIFIKASI AKAN KEKUATAN SANDWICH ---
+      // Angka yang dilihat user di API Mutlak sama dengan angka di MySQL
+      expect(apiTotalCount).toBe(dbRealCount);
+    });
+  });
+
+  // =========================================================================
+  // SKENARIO SANDWICH 4: Pembatalan Eksternal (API) ➔ Diverifikasi Internal (DB)
+  // =========================================================================
+  describe('Alur D: Top-Down Cancellation (Cancel API -> Cek DB Persistence)', () => {
+    it('harus merubah status menjadi CANCELLED via API dan tersimpan identik di Database', async () => {
+      // Setup: Create payment directly in DB
+      const em = orm!.em.fork();
+      const orderId = 'hybrid-cancel-' + Date.now();
+      const payment = Payment.create(orderId, 55000, 'midtrans');
+      await em.persistAndFlush(payment);
+
+      // --- SISI ATAS (HTTP Request) ---
+      const res = await app.request(`/v1/payments/${orderId}/cancel`, {
+        method: 'POST',
+        headers: {
+          'x-api-key': env.API_KEY,
+        },
+      });
+
+      expect(res.status).toBe(200);
+
+      // --- SISI BAWAH (Database Validation) ---
+      const updatedPaymentInDb = await em.findOne(Payment, { orderId });
+      expect(updatedPaymentInDb).not.toBeNull();
+      expect(updatedPaymentInDb?.getStatus()).toBe(PaymentStatus.CANCELLED);
+    });
+  });
+
+  // =========================================================================
+  // SKENARIO SANDWICH 5: Penandaan Kadaluarsa Eksternal (API) ➔ Diverifikasi Internal (DB)
+  // =========================================================================
+  describe('Alur E: Top-Down Expiration (Expire API -> Cek DB Persistence)', () => {
+    it('harus merubah status menjadi EXPIRED via API dan tersimpan identik di Database', async () => {
+      // Setup: Create payment directly in DB
+      const em = orm!.em.fork();
+      const orderId = 'hybrid-expire-' + Date.now();
+      const payment = Payment.create(orderId, 55000, 'midtrans');
+      await em.persistAndFlush(payment);
+
+      // --- SISI ATAS (HTTP Request) ---
+      const res = await app.request(`/v1/payments/${orderId}/expire`, {
+        method: 'POST',
+        headers: {
+          'x-api-key': env.API_KEY,
+        },
+      });
+
+      expect(res.status).toBe(200);
+
+      // --- SISI BAWAH (Database Validation) ---
+      const updatedPaymentInDb = await em.findOne(Payment, { orderId });
+      expect(updatedPaymentInDb).not.toBeNull();
+      expect(updatedPaymentInDb?.getStatus()).toBe(PaymentStatus.EXPIRED);
     });
   });
 });
+

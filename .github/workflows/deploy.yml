@@ -3,9 +3,9 @@ name: Deploy PaymentKit API
 on:
   push:
     branches: [sapi]
-    paths:
-      - 'api/**'
-      - '.github/workflows/**'
+    # paths:
+    #   - 'api/**'
+    #   - '.github/workflows/**'
 
 permissions:
   contents: read
@@ -101,6 +101,7 @@ jobs:
           context: ./api
           file: ./api/Dockerfile
           push: true
+          no-cache: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
