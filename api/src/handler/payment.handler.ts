@@ -81,4 +81,30 @@ export class PaymentHandler {
       HttpStatus.OK
     );
   }
-}
+
+  /**
+   * POST /payments/:orderId/cancel
+   * Cancels a pending payment
+   */
+  cancelPayment = async (c: Context, orderId: string) => {
+    const payment = await this.paymentService.cancelPayment(orderId);
+
+    return c.json(
+      buildSuccessResponse(mapPaymentToResponse(payment), 'Payment cancelled successfully'),
+      HttpStatus.OK
+    );
+  }
+
+  /**
+   * POST /payments/:orderId/expire
+   * Manually expires a pending payment
+   */
+  expirePayment = async (c: Context, orderId: string) => {
+    const payment = await this.paymentService.expirePayment(orderId);
+
+    return c.json(
+      buildSuccessResponse(mapPaymentToResponse(payment), 'Payment expired successfully'),
+      HttpStatus.OK
+    );
+  }
+}

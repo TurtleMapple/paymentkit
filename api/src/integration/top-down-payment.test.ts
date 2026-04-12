@@ -34,7 +34,9 @@ vi.mock('../domain/gateways/PaymentGatewayFactory', () => ({
         status: payload.transaction_status === 'settlement' ? 'PAID' : 'PENDING',
         paymentType: payload.payment_type,
         gatewayResponse: payload
-      }))
+      })),
+      // Simulasi Cancel API di Vendor
+      cancel: vi.fn().mockResolvedValue(true)
     }))
   }
 }));
@@ -217,4 +219,78 @@ describe('Top-Down Integration Test: End-to-End Payment Flow', () => {
       expect(foundOrder.status).toBe('PAID');
     });
   });
+
+  describe('TAHAP 6: Pembatalan Transaksi Baru (POST /v1/payments/:orderId/cancel)', () => {
+    it('harus berhasil membatalkan pembayaran yang berstatus PENDING', async () => {
+      // 1. Buat pembayaran baru khusus untuk ditest cancel
+      const paymentData = {
+        amount: 50000,
+        customer: { 
+          customerName: 'Cancel Tester', 
+          customerEmail: 'cancel@test.com', 
+          phone: '08123456789' 
+        },
+      };
+      const createRes = await app.request('/v1/payments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': env.API_KEY },
+        body: JSON.stringify(paymentData),
+      });
+      const createBody = await createRes.json();
+      const orderIdToCancel = createBody.data.orderId;
+
+      // 2. Jalankan aksi pembatalan
+      const res = await app.request(`/v1/payments/${orderIdToCancel}/cancel`, {
+        method: 'POST',
+        headers: { 'x-api-key': env.API_KEY },
+      });
+
+      // 3. Verifikasi Respon API
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.data.status).toBe('CANCELLED');
+
+      // 4. Verifikasi Database
+      const em = ormInstance().em.fork();
+      const paymentInDb = await em.findOne(Payment, { orderId: orderIdToCancel });
+      expect(paymentInDb?.getStatus()).toBe('CANCELLED');
+    });
+  });
+
+  describe('TAHAP 7: Penandaan Kadaluarsa (POST /v1/payments/:orderId/expire)', () => {
+    it('harus berhasil merubah status transaksi PENDING menjadi EXPIRED', async () => {
+      // 1. Buat pembayaran baru
+      const paymentData = {
+        amount: 35000,
+        customer: { 
+          customerName: 'Expire Tester', 
+          customerEmail: 'expire@test.com', 
+          phone: '08987654321' 
+        },
+      };
+      const createRes = await app.request('/v1/payments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': env.API_KEY },
+        body: JSON.stringify(paymentData),
+      });
+      const createBody = await createRes.json();
+      const orderIdToExpire = createBody.data.orderId;
+
+      // 2. Jalankan aksi expire
+      const res = await app.request(`/v1/payments/${orderIdToExpire}/expire`, {
+        method: 'POST',
+        headers: { 'x-api-key': env.API_KEY },
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.data.status).toBe('EXPIRED');
+
+      // 3. Verifikasi Database
+      const em = ormInstance().em.fork();
+      const paymentInDb = await em.findOne(Payment, { orderId: orderIdToExpire });
+      expect(paymentInDb?.getStatus()).toBe('EXPIRED');
+    });
+  });
 });
+

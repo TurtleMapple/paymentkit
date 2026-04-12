@@ -36,7 +36,8 @@ vi.mock('../domain/gateways/PaymentGatewayFactory', () => ({
         status: payload.transaction_status || 'PAID',
         paymentType: payload.payment_type,
         gatewayResponse: payload
-      }))
+      })),
+      cancel: vi.fn().mockResolvedValue(true)
     }))
   }
 }));
@@ -171,4 +172,61 @@ describe('Hybrid Integration Test: Payment Sandwich Validation', () => {
       expect(apiTotalCount).toBe(dbRealCount);
     });
   });
+
+  // =========================================================================
+  // SKENARIO SANDWICH 4: Pembatalan Eksternal (API) ➔ Diverifikasi Internal (DB)
+  // =========================================================================
+  describe('Alur D: Top-Down Cancellation (Cancel API -> Cek DB Persistence)', () => {
+    it('harus merubah status menjadi CANCELLED via API dan tersimpan identik di Database', async () => {
+      // Setup: Create payment directly in DB
+      const em = orm!.em.fork();
+      const orderId = 'hybrid-cancel-' + Date.now();
+      const payment = Payment.create(orderId, 55000, 'midtrans');
+      await em.persistAndFlush(payment);
+
+      // --- SISI ATAS (HTTP Request) ---
+      const res = await app.request(`/v1/payments/${orderId}/cancel`, {
+        method: 'POST',
+        headers: {
+          'x-api-key': env.API_KEY,
+        },
+      });
+
+      expect(res.status).toBe(200);
+
+      // --- SISI BAWAH (Database Validation) ---
+      const updatedPaymentInDb = await em.findOne(Payment, { orderId });
+      expect(updatedPaymentInDb).not.toBeNull();
+      expect(updatedPaymentInDb?.getStatus()).toBe(PaymentStatus.CANCELLED);
+    });
+  });
+
+  // =========================================================================
+  // SKENARIO SANDWICH 5: Penandaan Kadaluarsa Eksternal (API) ➔ Diverifikasi Internal (DB)
+  // =========================================================================
+  describe('Alur E: Top-Down Expiration (Expire API -> Cek DB Persistence)', () => {
+    it('harus merubah status menjadi EXPIRED via API dan tersimpan identik di Database', async () => {
+      // Setup: Create payment directly in DB
+      const em = orm!.em.fork();
+      const orderId = 'hybrid-expire-' + Date.now();
+      const payment = Payment.create(orderId, 55000, 'midtrans');
+      await em.persistAndFlush(payment);
+
+      // --- SISI ATAS (HTTP Request) ---
+      const res = await app.request(`/v1/payments/${orderId}/expire`, {
+        method: 'POST',
+        headers: {
+          'x-api-key': env.API_KEY,
+        },
+      });
+
+      expect(res.status).toBe(200);
+
+      // --- SISI BAWAH (Database Validation) ---
+      const updatedPaymentInDb = await em.findOne(Payment, { orderId });
+      expect(updatedPaymentInDb).not.toBeNull();
+      expect(updatedPaymentInDb?.getStatus()).toBe(PaymentStatus.EXPIRED);
+    });
+  });
 });
+

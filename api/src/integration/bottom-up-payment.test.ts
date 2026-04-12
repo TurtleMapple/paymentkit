@@ -30,8 +30,9 @@ vi.mock('../domain/gateways/PaymentGatewayFactory', () => ({
         paymentType: 'bank_transfer',
         expiredAt: new Date(Date.now() + 864000),
         gatewayResponse: {}
-      })
-    }))
+    }),
+    cancel: vi.fn().mockResolvedValue(true)
+  }))
   }
 }));
 
@@ -167,5 +168,30 @@ describe('Bottom-Up Integration Test: Pondasi Sistem Pembayaran', () => {
       const finalCheck = await repository.findByOrderId(orderId);
       expect(finalCheck?.getStatus()).toBe(PaymentStatus.FAILED);
     });
+
+    it('harus dapat membatalkan pembayaran melalui orkestrasi service (Cancel Use Case)', async () => {
+      const orderId = 'bottomup-cancel-' + Date.now();
+      await service.createPayment(orderId, 25000, 'midtrans');
+
+      const cancelledPayment = await service.cancelPayment(orderId);
+
+      expect(cancelledPayment.getStatus()).toBe(PaymentStatus.CANCELLED);
+      
+      const dbProof = await repository.findByOrderId(orderId);
+      expect(dbProof?.getStatus()).toBe(PaymentStatus.CANCELLED);
+    });
+
+    it('harus dapat menandai pembayaran kadaluarsa melalui orkestrasi service (Expire Use Case)', async () => {
+      const orderId = 'bottomup-expire-' + Date.now();
+      await service.createPayment(orderId, 35000, 'midtrans');
+
+      const expiredPayment = await service.expirePayment(orderId);
+
+      expect(expiredPayment.getStatus()).toBe(PaymentStatus.EXPIRED);
+      
+      const dbProof = await repository.findByOrderId(orderId);
+      expect(dbProof?.getStatus()).toBe(PaymentStatus.EXPIRED);
+    });
   });
 });
+
