@@ -101,6 +101,7 @@ jobs:
           context: ./api
           file: ./api/Dockerfile
           push: true
+          no-cache: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
